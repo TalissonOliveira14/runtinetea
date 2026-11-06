@@ -1,0 +1,32 @@
+<div class="chip">
+  <span>{{ routine.room().icon }} {{ routine.room().name }}</span>
+  <span class="xp">⭐ Nível {{ routine.level() }} · {{ routine.xp() }} XP</span>
+</div>
+
+<div class="panel">
+  @if (routine.now(); as now) {
+    <div class="agora">
+      <small>AGORA</small>
+      <strong>{{ now.icon }} {{ now.label }}</strong>
+    </div>
+  }
+  <div class="depois">
+    <small>DEPOIS</small>
+    <span>{{ routine.next().icon }} {{ routine.next().label }}</span>
+  </div>
+  <div class="dots">
+    @for (s of routine.room().steps; track $index) {
+      <i [class.done]="$index < routine.stepIndex()" [class.cur]="$index === routine.stepIndex()"></i>
+    }
+  </div>
+</div>
+
+@if (routine.roomDone()) {
+  <div class="celebrate">
+    <div class="card">
+      <div class="big">🎉</div>
+      <h2>{{ routine.room().name }} concluído!</h2>
+      <p>+{{ routine.lastGain() }} XP</p>
+    </div>
+  </div>
+}

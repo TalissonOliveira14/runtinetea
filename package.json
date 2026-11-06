@@ -29,13 +29,20 @@
     "@angular/forms": "^21.1.0",
     "@angular/platform-browser": "^21.1.0",
     "@angular/router": "^21.1.0",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@ionic/angular": "^9.0.4",
+    "@types/howler": "^2.2.13",
+    "howler": "^2.2.4",
     "rxjs": "~7.8.0",
+    "three": "^0.187.0",
     "tslib": "^2.3.0"
   },
   "devDependencies": {
     "@angular/build": "^21.1.4",
     "@angular/cli": "^21.1.4",
     "@angular/compiler-cli": "^21.1.0",
+    "@types/three": "^0.187.0",
     "typescript": "~5.9.2"
   }
 }

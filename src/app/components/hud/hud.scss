@@ -1,0 +1,89 @@
+:host {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
+}
+
+.chip {
+  position: absolute;
+  top: 84px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 16px;
+  padding: 8px 14px;
+  font-weight: 800;
+  color: #1e293b;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+
+  .xp { font-size: 0.8rem; color: #b45309; }
+}
+
+.panel {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  width: min(92vw, 380px);
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 22px;
+  padding: 12px 18px 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  text-align: center;
+
+  small { display: block; font-size: 0.65rem; letter-spacing: 0.12em; font-weight: 800; }
+
+  .agora {
+    background: #fde047;
+    border-radius: 14px;
+    padding: 8px 10px;
+    small { color: #854d0e; }
+    strong { font-size: 1.25rem; color: #1e293b; }
+  }
+
+  .depois {
+    margin-top: 8px;
+    small { color: #64748b; }
+    span { font-size: 0.95rem; color: #475569; font-weight: 700; }
+  }
+
+  .dots {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 8px;
+    i {
+      width: 12px; height: 12px; border-radius: 50%;
+      background: #cbd5e1;
+      &.done { background: #22c55e; }
+      &.cur { background: #facc15; box-shadow: 0 0 0 3px #fef08a; }
+    }
+  }
+}
+
+.celebrate {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.35);
+  animation: fade 0.3s ease;
+
+  .card {
+    background: #fff;
+    border-radius: 28px;
+    padding: 24px 40px;
+    text-align: center;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+    animation: pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1);
+    .big { font-size: 3.5rem; }
+    h2 { margin: 6px 0; color: #16a34a; }
+    p { margin: 0; font-size: 1.4rem; font-weight: 800; color: #b45309; }
+  }
+}
+
+@keyframes fade { from { opacity: 0; } }
+@keyframes pop { from { transform: scale(0.4); opacity: 0; } }

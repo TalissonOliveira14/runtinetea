@@ -1,9 +1,9 @@
 .base {
   position: fixed;
-  left: 24px;
-  bottom: 24px;
-  width: 130px;
-  height: 130px;
+  left: calc(18px + env(safe-area-inset-left));
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  width: clamp(110px, 28vmin, 160px);
+  height: clamp(110px, 28vmin, 160px);
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.35);
   border: 3px solid rgba(255, 255, 255, 0.7);
@@ -12,11 +12,12 @@
   user-select: none;
   display: grid;
   place-items: center;
+  z-index: 10;
 }
 
 .knob {
-  width: 56px;
-  height: 56px;
+  width: 42%;
+  height: 42%;
   border-radius: 50%;
   background: rgba(30, 41, 59, 0.75);
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);

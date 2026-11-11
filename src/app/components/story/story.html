@@ -1,0 +1,18 @@
+<div class="wrap">
+  <div class="card">
+    <div class="title">{{ routine.room().icon }} {{ routine.room().name }}</div>
+    <div class="big" (click)="read()">{{ pages()[page()].icon }}</div>
+    <p class="text" (click)="read()">{{ pages()[page()].text }}</p>
+    <button class="hear" (click)="read()">🔊 Ouvir de novo</button>
+    <div class="dots">
+      @for (p of pages(); track $index) {
+        <i [class.on]="$index === page()"></i>
+      }
+    </div>
+    <button class="go" (click)="next()">{{ page() >= pages().length - 1 ? '▶ Vamos!' : 'Próximo ➜' }}</button>
+    <div class="links">
+      <button (click)="back()">🗺️ Mapa</button>
+      <button (click)="skip()">Pular</button>
+    </div>
+  </div>
+</div>

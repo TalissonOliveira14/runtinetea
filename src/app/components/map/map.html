@@ -1,0 +1,67 @@
+<div class="map">
+  <header>
+    <div class="hello">🌈 Olá, {{ routine.childName() }}!</div>
+    <div class="chips">
+      <span>⭐ {{ progress.totalStars() }}</span>
+      <span>🔥 {{ progress.profile().streak }}</span>
+      <span>🏷️ {{ progress.profile().stickers.length }}/{{ rooms.length }}</span>
+    </div>
+    <div class="acts">
+      <button class="calm" (click)="openCalm()" aria-label="Cantinho da calma">🫧</button>
+      <button (click)="albumOpen.set(true)" aria-label="Figurinhas">🏷️</button>
+      <button (click)="openSettings()" aria-label="Ajustes">⚙️</button>
+    </div>
+  </header>
+
+  <div class="scroll">
+    @for (w of worlds; track w.id) {
+      <section>
+        <h2>{{ w.icon }} {{ w.name }}</h2>
+        <div class="levels">
+          @for (l of levelsOf(w.id); track l.i) {
+            <button class="lvl" [class.locked]="!unlocked(l.i)" (click)="play(l.i)">
+              <span class="ic">{{ unlocked(l.i) ? l.r.icon : '🔒' }}</span>
+              <b>{{ l.r.name }}</b>
+              <span class="st">
+                @for (s of [1, 2, 3]; track s) {
+                  <i [class.on]="s <= stars(l.i)">★</i>
+                }
+              </span>
+            </button>
+          }
+        </div>
+      </section>
+    }
+  </div>
+
+  @if (moodOpen()) {
+    <div class="modal">
+      <div class="box">
+        <h3>Como você está hoje?</h3>
+        <div class="moods">
+          @for (m of moods; track m.id) {
+            <button (click)="pickMood(m.id)"><span>{{ m.e }}</span><b>{{ m.l }}</b></button>
+          }
+        </div>
+        <button class="skip" (click)="moodOpen.set(false); routine.moodAsked.set(true)">Agora não</button>
+      </div>
+    </div>
+  }
+
+  @if (albumOpen()) {
+    <div class="modal" (click)="albumOpen.set(false)">
+      <div class="box">
+        <h3>🏷️ Minhas figurinhas</h3>
+        <div class="album">
+          @for (r of rooms; track r.id) {
+            <div class="sticker" [class.got]="hasSticker(r.id)" (click)="hear(hasSticker(r.id) ? r.name : 'Termine esta fase para ganhar.')">
+              <span>{{ hasSticker(r.id) ? r.icon : '❔' }}</span>
+              <b>{{ r.name }}</b>
+            </div>
+          }
+        </div>
+        <button class="skip" (click)="albumOpen.set(false)">Fechar</button>
+      </div>
+    </div>
+  }
+</div>

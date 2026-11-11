@@ -3,20 +3,49 @@
   <span class="xp">⭐ Nível {{ routine.level() }} · {{ routine.xp() }} XP</span>
 </div>
 
+<div class="tools">
+  <button (click)="map()" aria-label="Mapa">🗺️</button>
+  <button class="calm" (click)="calm()" aria-label="Preciso de calma">🫧</button>
+  <button (click)="settings()" aria-label="Ajustes" [class.talking]="voice.speaking()">⚙️</button>
+</div>
+
+@if (routine.sleeping()) {
+  <div class="hint">😴 Mexa o joystick (ou as setas) para acordar!</div>
+}
+
 <div class="panel">
-  @if (routine.now(); as now) {
-    <div class="agora">
-      <small>AGORA</small>
+  <div class="agora">
+    <small>AGORA</small>
+    @if (routine.now(); as now) {
       <strong>{{ now.icon }} {{ now.label }}</strong>
+    } @else {
+      <strong>🧭 Escolha o que fazer!</strong>
+    }
+    @if (routine.busy()) {
+      <div class="bar"><i [style.width.%]="routine.progressBar() * 100"></i></div>
+    }
+    <div class="acts">
+      <button (click)="repeat()">🔁 Ouvir</button>
+      <button (click)="demo()">👀 Mostre-me</button>
+    </div>
+  </div>
+
+  @if (!routine.freeMode()) {
+    <div class="depois">
+      <small>DEPOIS</small>
+      <span>{{ routine.next().icon }} {{ routine.next().label }}</span>
     </div>
   }
-  <div class="depois">
-    <small>DEPOIS</small>
-    <span>{{ routine.next().icon }} {{ routine.next().label }}</span>
-  </div>
-  <div class="dots">
+
+  <!-- Agenda visual: todas as etapas em figuras -->
+  <div class="schedule">
     @for (s of routine.room().steps; track $index) {
-      <i [class.done]="$index < routine.stepIndex()" [class.cur]="$index === routine.stepIndex()"></i>
+      <button class="step" [class.done]="isDone($index)" [class.cur]="isCurrent($index)" (click)="say(s.label)">
+        {{ s.icon }}
+        @if (isDone($index)) {
+          <b>✔</b>
+        }
+      </button>
     }
   </div>
 </div>

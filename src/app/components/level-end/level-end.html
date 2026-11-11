@@ -1,0 +1,49 @@
+<div class="wrap">
+  <div class="card">
+    @switch (stage()) {
+      @case ('win') {
+        <div class="big">{{ newSticker() ? level.icon : '🎉' }}</div>
+        <h2>{{ level.name }} concluído!</h2>
+        @if (newSticker()) {
+          <p class="sub">🏷️ Figurinha nova!</p>
+        }
+        <button class="go" (click)="startQuiz()">🎯 Fazer um desafio</button>
+        <button class="link" (click)="skipQuiz()">Pular o desafio</button>
+      }
+      @case ('quiz') {
+        <div class="prog">Desafio {{ qi() + 1 }} de {{ questions.length }}</div>
+        @if (q.show) {
+          <div class="show" (click)="hear()">{{ q.show }}</div>
+        }
+        <p class="q" (click)="hear()">{{ q.say }}</p>
+        <button class="hear" (click)="hear()">🔊 Ouvir a pergunta</button>
+        <div class="opts">
+          @for (o of opts(); track $index) {
+            <button class="opt" [class.ok]="correctNow() && chosen() === $index" [class.bad]="!correctNow() && chosen() === $index" [class.hint]="isHint(o)" (click)="pick(o, $index)">
+              {{ o.label }}
+            </button>
+          }
+        </div>
+        @if (correctNow()) {
+          <div class="yay">🌟</div>
+        }
+      }
+      @case ('final') {
+        <div class="big">🏆</div>
+        <h2>Muito bem!</h2>
+        <div class="stars">
+          @for (s of [1, 2, 3]; track s) {
+            <i [class.on]="s <= stars()" [style.animation-delay.s]="s * 0.25">★</i>
+          }
+        </div>
+        <div class="btns">
+          @if (canNext) {
+            <button class="go" (click)="next()">▶ Próxima fase</button>
+          }
+          <button class="alt" (click)="map()">🗺️ Mapa</button>
+          <button class="alt" (click)="again()">🔁 Jogar de novo</button>
+        </div>
+      }
+    }
+  </div>
+</div>

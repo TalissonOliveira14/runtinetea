@@ -1,0 +1,62 @@
+<div class="wrap" (click)="close()">
+  <div class="card" (click)="$event.stopPropagation()">
+    <h2>⚙️ Ajustes</h2>
+
+    <div class="grid">
+      <button class="tg" [class.on]="audio.musicOn()" (click)="toggleMusic()">🎵 Música</button>
+      <button class="tg" [class.on]="audio.sfxOn()" (click)="toggleSfx()">🔊 Sons</button>
+      <button class="tg" [class.on]="voice.enabled()" (click)="toggleVoice()">🗣️ Voz</button>
+      <button class="tg" [class.on]="s.calmMotion" (click)="toggle('calmMotion')">🌿 Movimento calmo</button>
+      <button class="tg" [class.on]="s.freeOrder" (click)="toggle('freeOrder')">🧭 Eu escolho a ordem</button>
+      @if (canFullscreen) {
+        <button class="tg" (click)="fullscreen()">⛶ Tela cheia</button>
+      }
+    </div>
+
+    <h3>Quem joga</h3>
+    <div class="row">
+      <button class="pk" [class.on]="progress.profile().avatar === 'menino'" (click)="avatar('menino')">👦</button>
+      <button class="pk" [class.on]="progress.profile().avatar === 'menina'" (click)="avatar('menina')">👧</button>
+      @for (p of pets; track p.type) {
+        <button class="pk" [class.on]="petOn(p.type)" (click)="pet(p.type)">{{ p.icon }}</button>
+      }
+    </div>
+
+    <h3>Cor da camisa</h3>
+    <div class="row">
+      @for (c of colors; track c) {
+        <button class="sw" [class.on]="s.topColor === c" [style.background]="hex(c)" (click)="color(c)"></button>
+      }
+    </div>
+
+    <h3>Qualidade do desenho</h3>
+    <div class="row">
+      <button class="pill" [class.on]="s.quality === 'auto'" (click)="quality('auto')">Automática</button>
+      <button class="pill" [class.on]="s.quality === 'alta'" (click)="quality('alta')">Alta</button>
+      <button class="pill" [class.on]="s.quality === 'leve'" (click)="quality('leve')">Leve (celular fraco)</button>
+    </div>
+
+    <div class="row end">
+      @if (routine.screen() === 'play') {
+        <button class="alt" (click)="goMap()">🗺️ Voltar ao mapa</button>
+      }
+      <button class="go" (click)="close()">✔ Pronto</button>
+    </div>
+
+    <hr />
+    <h3>👨‍👩‍👧 Painel dos pais</h3>
+    @if (!parentOpen()) {
+      <p class="small">Para abrir, responda: quanto é <b>{{ question }}</b>?</p>
+      <div class="row">
+        <input #ans type="number" inputmode="numeric" [value]="answer()" (input)="answer.set(ans.value)" (keydown.enter)="unlockParents()" />
+        <button class="alt" (click)="unlockParents()">Abrir</button>
+      </div>
+    } @else {
+      <pre class="report">{{ report() }}</pre>
+      <div class="row">
+        <button class="alt" (click)="copy()">{{ copied() ? '✔ Copiado' : '📋 Copiar relatório' }}</button>
+        <button class="danger" (click)="reset()">{{ confirmReset() ? 'Toque de novo para apagar tudo' : '🗑️ Apagar progresso' }}</button>
+      </div>
+    }
+  </div>
+</div>

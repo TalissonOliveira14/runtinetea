@@ -1,0 +1,5 @@
+<div class="wrap">
+  <div class="text">{{ text() }}</div>
+  <div class="bubble" [style.transform]="'scale(' + scale() + ')'" [style.transition-duration.s]="dur()"></div>
+  <button class="back" (click)="close()">{{ done() ? '✔ Voltar ao jogo' : 'Voltar ao jogo' }}</button>
+</div>

@@ -3,87 +3,88 @@
   inset: 0;
   pointer-events: none;
   font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 .chip {
-  position: absolute;
-  top: 84px;
-  left: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: rgba(255, 255, 255, 0.92);
-  border-radius: 16px;
-  padding: 8px 14px;
-  font-weight: 800;
-  color: #1e293b;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
-
-  .xp { font-size: 0.8rem; color: #b45309; }
+  position: absolute; top: calc(10px + env(safe-area-inset-top)); left: calc(10px + env(safe-area-inset-left));
+  display: flex; flex-direction: column; gap: 2px;
+  background: rgba(255, 255, 255, 0.92); border-radius: 16px; padding: 6px 12px;
+  font-weight: 800; color: #1e293b; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  .xp { font-size: 0.75rem; color: #b45309; }
 }
 
-.panel {
-  position: absolute;
-  left: 50%;
-  bottom: 18px;
-  transform: translateX(-50%);
-  width: min(92vw, 380px);
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 22px;
-  padding: 12px 18px 10px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
-  text-align: center;
+.tools {
+  position: absolute; top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right));
+  display: flex; gap: 8px; pointer-events: auto;
+  button {
+    width: 48px; height: 48px; border-radius: 50%; border: none; font-size: 1.4rem;
+    background: rgba(255, 255, 255, 0.94); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22); cursor: pointer;
+    &.calm { background: #bae6fd; }
+    &.talking { box-shadow: 0 0 0 4px #facc15; }
+  }
+}
 
-  small { display: block; font-size: 0.65rem; letter-spacing: 0.12em; font-weight: 800; }
+.hint {
+  position: absolute; top: 38%; left: 50%; transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.95); border-radius: 20px; padding: 10px 20px;
+  font-size: 1.1rem; font-weight: 800; color: #1e293b; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  animation: bob 1.6s ease-in-out infinite; text-align: center; max-width: 90vw;
+}
+
+/* ---- painel AGORA / DEPOIS ---- */
+.panel {
+  position: absolute; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  width: min(92vw, 400px); background: rgba(255, 255, 255, 0.95); border-radius: 22px;
+  padding: 10px 14px 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25); text-align: center;
+  small { display: block; font-size: 0.62rem; letter-spacing: 0.12em; font-weight: 800; }
 
   .agora {
-    background: #fde047;
-    border-radius: 14px;
-    padding: 8px 10px;
+    background: #fde047; border-radius: 14px; padding: 6px 10px;
     small { color: #854d0e; }
-    strong { font-size: 1.25rem; color: #1e293b; }
+    strong { font-size: 1.2rem; color: #1e293b; }
+    .bar { margin-top: 6px; height: 10px; border-radius: 6px; background: rgba(255, 255, 255, 0.7); overflow: hidden; i { display: block; height: 100%; background: #22c55e; transition: width 0.1s linear; } }
+    .acts { display: flex; justify-content: center; gap: 8px; margin-top: 6px; pointer-events: auto;
+      button { border: none; border-radius: 12px; padding: 6px 12px; font-size: 0.9rem; font-weight: 800; color: #1e293b; background: #fff; box-shadow: 0 3px 0 #ca8a04; cursor: pointer; &:active { transform: translateY(2px); box-shadow: 0 1px 0 #ca8a04; } }
+    }
   }
 
-  .depois {
-    margin-top: 8px;
-    small { color: #64748b; }
-    span { font-size: 0.95rem; color: #475569; font-weight: 700; }
-  }
+  .depois { margin-top: 6px; small { color: #64748b; } span { font-size: 0.9rem; color: #475569; font-weight: 700; } }
 
-  .dots {
-    display: flex;
-    justify-content: center;
-    gap: 8px;
-    margin-top: 8px;
-    i {
-      width: 12px; height: 12px; border-radius: 50%;
-      background: #cbd5e1;
-      &.done { background: #22c55e; }
-      &.cur { background: #facc15; box-shadow: 0 0 0 3px #fef08a; }
+  .schedule {
+    display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; pointer-events: auto;
+    .step {
+      position: relative; width: 42px; height: 42px; border-radius: 12px; border: none; display: grid; place-items: center;
+      font-size: 1.4rem; background: #e2e8f0; filter: grayscale(0.7); opacity: 0.75; cursor: pointer;
+      &.cur { background: #fef08a; filter: none; opacity: 1; box-shadow: 0 0 0 3px #facc15; }
+      &.done { background: #bbf7d0; filter: none; opacity: 0.9; }
+      b { position: absolute; right: -4px; bottom: -4px; width: 18px; height: 18px; border-radius: 50%; background: #22c55e; color: #fff; font-size: 0.7rem; display: grid; place-items: center; }
     }
   }
 }
 
-.celebrate {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background: rgba(15, 23, 42, 0.35);
-  animation: fade 0.3s ease;
-
-  .card {
-    background: #fff;
-    border-radius: 28px;
-    padding: 24px 40px;
-    text-align: center;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
-    animation: pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1);
-    .big { font-size: 3.5rem; }
-    h2 { margin: 6px 0; color: #16a34a; }
-    p { margin: 0; font-size: 1.4rem; font-weight: 800; color: #b45309; }
+/* ---- celular: o painel sobe para não ficar em cima do joystick ---- */
+@media (max-width: 900px), (max-height: 520px) {
+  .panel {
+    left: calc(10px + env(safe-area-inset-left)); right: calc(10px + env(safe-area-inset-right));
+    bottom: auto; top: calc(62px + env(safe-area-inset-top)); transform: none; width: auto; max-width: 420px;
+    padding: 6px 10px; border-radius: 18px;
+    .depois { display: none; }
+    .agora strong { font-size: 1rem; }
+    .schedule .step { width: 36px; height: 36px; font-size: 1.15rem; }
   }
+  .chip { display: none; }
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  .panel { left: calc(12px + env(safe-area-inset-left)); right: auto; width: 300px; }
+}
+
+.celebrate {
+  position: absolute; inset: 0; display: grid; place-items: center; background: rgba(15, 23, 42, 0.3); animation: fade 0.3s ease;
+  .card { background: #fff; border-radius: 28px; padding: 24px 40px; text-align: center; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35); animation: pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1);
+    .big { font-size: 3.5rem; } h2 { margin: 6px 0; color: #16a34a; } p { margin: 0; font-size: 1.4rem; font-weight: 800; color: #b45309; } }
 }
 
 @keyframes fade { from { opacity: 0; } }
 @keyframes pop { from { transform: scale(0.4); opacity: 0; } }
+@keyframes bob { 50% { transform: translateX(-50%) translateY(-6px); } }

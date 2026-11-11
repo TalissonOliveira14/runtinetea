@@ -1,17 +1,18 @@
 <div class="game-container">
   <canvas #renderCanvas></canvas>
 
-  <!-- HUD de Seleção de Avatares -->
-  <div class="character-selector">
-    <button (click)="changeChar('menino')" class="btn-char menino">👦 Menino</button>
-    <button (click)="changeChar('menina')" class="btn-char menina">👧 Menina</button>
-    <button (click)="changeChar('cachorro')" class="btn-char cao">🐶 Cão</button>
-    <button (click)="changeChar('gato')" class="btn-char gato">🐱 Gato</button>
-    <button (click)="changeChar('coelho')" class="btn-char coelho">🐰 Coelho</button>
-    <button (click)="changeChar('panda')" class="btn-char panda">🐼 Panda</button>
-  </div>
+  @switch (routine.screen()) {
+    @case ('start') { <app-start /> }
+    @case ('map') { <app-map /> }
+    @case ('story') { <app-story /> }
+    @case ('play') {
+      <app-hud />
+      <app-joystick />
+    }
+    @case ('end') { <app-level-end /> }
+  }
 
-  <!-- Rotina (AGORA / DEPOIS, XP) e controle de toque -->
-  <app-hud />
-  <app-joystick />
+  <!-- Aparecem por cima de qualquer tela -->
+  @if (routine.calmOpen()) { <app-calm /> }
+  @if (routine.settingsOpen()) { <app-settings /> }
 </div>

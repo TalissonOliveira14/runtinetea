@@ -1,0 +1,29 @@
+// Estilos compartilhados (cartões e botões grandes e amigáveis)
+@mixin card { background: #fff; border-radius: 28px; box-shadow: 0 16px 50px rgba(0, 0, 0, 0.35); }
+
+@mixin overlay($bg: rgba(30, 58, 138, 0.6)) {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  background: $bg;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  overflow-y: auto;
+  font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
+}
+
+@mixin bigbtn($c1: #22c55e, $c2: #16a34a, $edge: #15803d) {
+  font-size: 1.4rem;
+  font-weight: 900;
+  padding: 14px 22px;
+  border-radius: 20px;
+  border: none;
+  color: #fff;
+  background: linear-gradient(135deg, $c1, $c2);
+  box-shadow: 0 6px 0 $edge;
+  cursor: pointer;
+  &:active { transform: translateY(3px); box-shadow: 0 3px 0 $edge; }
+}

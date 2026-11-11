@@ -1,0 +1,11 @@
+@use '../ui' as *;
+
+:host { @include overlay(linear-gradient(180deg, #bae6fd, #ddd6fe)); z-index: 70; }
+.wrap { display: flex; flex-direction: column; align-items: center; gap: 4vmin; width: 100%; }
+.text { font-size: clamp(1.6rem, 6vmin, 2.4rem); font-weight: 900; color: #1e3a8a; text-align: center; min-height: 3rem; }
+.bubble {
+  width: clamp(160px, 46vmin, 320px); aspect-ratio: 1; border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #ffffff, #7dd3fc 55%, #6366f1);
+  box-shadow: 0 0 60px rgba(99, 102, 241, 0.5); transition-property: transform; transition-timing-function: ease-in-out;
+}
+.back { @include bigbtn(#6366f1, #4f46e5, #3730a3); font-size: 1.1rem; margin-top: 2vmin; }

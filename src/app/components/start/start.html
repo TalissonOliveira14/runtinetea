@@ -1,0 +1,31 @@
+<div class="overlay">
+  <div class="card">
+    <div class="logo">🌈 Minha Rotina</div>
+
+    <label class="field">
+      <span>Qual é o seu nome?</span>
+      <input #nameInput type="text" maxlength="20" placeholder="Digite o seu nome"
+             [value]="name()" (input)="name.set(nameInput.value)" (keydown.enter)="start()" />
+    </label>
+
+    <div class="group">
+      <span>Quem vai jogar?</span>
+      <div class="row">
+        <button class="pick" [class.on]="avatar() === 'menino'" (click)="choose('menino')">👦<b>Menino</b></button>
+        <button class="pick" [class.on]="avatar() === 'menina'" (click)="choose('menina')">👧<b>Menina</b></button>
+      </div>
+    </div>
+
+    <div class="group">
+      <span>Quem vai junto com você?</span>
+      <div class="row">
+        @for (p of pets; track p.type) {
+          <button class="pick small" [class.on]="petOn(p.type)" (click)="togglePet(p.type)">{{ p.icon }}<b>{{ p.label }}</b></button>
+        }
+      </div>
+    </div>
+
+    <button class="go" [disabled]="!canStart()" (click)="start()">▶ Começar</button>
+    <p class="note">🔊 Vamos falar com você. Ligue o som do aparelho!</p>
+  </div>
+</div>

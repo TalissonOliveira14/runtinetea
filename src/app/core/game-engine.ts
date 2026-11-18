@@ -1,7 +1,6 @@
 import { Injectable, NgZone, signal } from '@angular/core';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoutineService } from './routine.service';
 import { AudioService } from './audio.service';
 import { VoiceService } from './voice.service';
@@ -13,7 +12,7 @@ import { Fx } from '../scenes/fx';
 
 export type CharacterType = 'menino' | 'menina' | 'cachorro' | 'gato' | 'coelho' | 'panda';
 export type PetType = Exclude<CharacterType, 'menino' | 'menina'>;
-type AnimName = 'idle' | 'walk' | 'run';
+type AnimName = 'idle' | 'walk' | 'run' | 'sit' | 'angry';
 type OutfitPart = 'hair' | 'top' | 'pants' | 'shoes';
 
 const WALK_SPEED = 3.5; // unidades por segundo
@@ -25,14 +24,7 @@ const ROOM_CHANGE_DELAY = 4200; // ms de comemoração antes de trocar de sala
 const PRAISES = ['Muito bem, {nome}!', 'Isso aí, {nome}!', 'Parabéns, {nome}!', 'Você conseguiu, {nome}!', 'Que legal, {nome}!'];
 const DAY_COMPLETE_DELAY = 6500;
 
-// Palavras para achar as animações pelo nome, mesmo que o pacote use variações
-const ANIM_PATTERNS: Record<AnimName, RegExp[]> = {
-  idle: [/^idle$/i, /idle/i, /stand/i],
-  walk: [/^walk$/i, /walk/i],
-  run: [/^run$/i, /run/i, /sprint/i, /jog/i],
-};
-
-// Palavras para achar cada peça pelo NOME DO MATERIAL
+// Palavras para achar cada peça pelo NOME DO MATERIAL (para a troca de roupa)
 const MATERIAL_KEYWORDS: Record<OutfitPart, string[]> = {
   hair: ['hair', 'cabelo'],
   top: ['shirt', 'top', 'jacket', 'hoodie', 'torso', 'cloth', 'sweater', 'coat', 'blouse'],
@@ -40,26 +32,12 @@ const MATERIAL_KEYWORDS: Record<OutfitPart, string[]> = {
   shoes: ['shoe', 'boot', 'feet', 'foot', 'sneaker'],
 };
 
-// Se o material não casar, tenta pelo NOME DA MALHA (os pacotes "Modular" dividem em Head/Body/Legs/Feet)
-const MESH_KEYWORDS: Record<OutfitPart, string[]> = {
-  hair: ['hair'],
-  top: ['body', 'torso', 'chest'],
-  pants: ['legs', 'pants'],
-  shoes: ['feet', 'shoes', 'boots'],
-};
-
 // Materiais que nunca são recoloridos (pele, olhos, rosto)
-const PROTECTED = /skin|eye|face|mouth|teeth|brow|lip/i;
-
-// Cores em 0xRRGGBB. Visual de princesa e príncipe.
-const OUTFITS: Partial<Record<CharacterType, Partial<Record<OutfitPart, number>>>> = {
-  menina: { hair: 0xfde68a, top: 0xf9a8d4, pants: 0xfbcfe8, shoes: 0xfacc15 },
-  menino: { hair: 0x78350f, top: 0x1d4ed8, pants: 0xf1f5f9, shoes: 0x3f2a14 },
-};
+const PROTECTED = /skin|eye|face|mouth|teeth|brow|lip|head|hand|arm|leg|foot|shoe|hair/i;
 
 // Acessórios criados por código (tamanhos são proporcionais à altura do personagem)
 const ROYAL: Partial<Record<CharacterType, { crown: number; skirt?: number; cape?: number }>> = {
-  menina: { crown: 0xfacc15, skirt: 0xf472b6 },
+  menina: { crown: 0xfacc15 },
   menino: { crown: 0xfacc15, cape: 0xdc2626 },
 };
 
@@ -107,7 +85,9 @@ export class GameEngineService {
 
   private mixer?: THREE.AnimationMixer;
   private actions: Partial<Record<AnimName, THREE.AnimationAction>> = {};
+  private clipCache = new Map<AnimName, THREE.AnimationClip>();
   private currentAnim?: AnimName;
+  private forcedAnim?: AnimName;
 
   private clock = new THREE.Clock();
   private animationFrameId = 0;
@@ -170,7 +150,6 @@ export class GameEngineService {
   private onResizeBound = () => this.onResize();
   private unlockAudio = () => {
     this.audio.unlock();
-    // iPhone/Android: o som só libera depois de um toque; mantém até o áudio realmente rodar
     for (const ev of ['pointerdown', 'touchend', 'click', 'keydown']) window.removeEventListener(ev, this.unlockAudio);
   };
   private onVisibility = () => {
@@ -202,6 +181,8 @@ export class GameEngineService {
     this.renderer.setSize(w, h);
     this.renderer.setPixelRatio(this.pixelRatio());
     this.renderer.shadowMap.enabled = true;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.02;
 
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
@@ -328,13 +309,13 @@ export class GameEngineService {
   private async keepAwake(): Promise<void> {
     try {
       const wl = (navigator as unknown as { wakeLock?: { request(t: string): Promise<{ release(): Promise<void> }> } }).wakeLock;
-      if (wl && !this.wakeLock) this.wakeLock = await wl.request('screen'); // a tela não apaga durante o jogo
+      if (wl && !this.wakeLock) this.wakeLock = await wl.request('screen');
     } catch {
       /* sem suporte: tudo bem */
     }
   }
 
-  /** "Mostre-me": o personagem faz a etapa sozinho para a criança aprender vendo (modelagem por vídeo) */
+  /** "Mostre-me": o personagem faz a etapa sozinho para a criança aprender vendo */
   public demo(): void {
     if (!this.routine.started() || this.act || this.demoStep || this.routine.roomDone()) return;
     const cands = this.routine.candidates();
@@ -403,6 +384,7 @@ export class GameEngineService {
     }
     this.fx.clear();
     this.act = undefined;
+    this.forcedAnim = undefined;
     this.locked = false;
     this.demoStep = undefined;
     this.discardHeld();
@@ -410,7 +392,7 @@ export class GameEngineService {
     this.audio.water(false);
 
     const def = ROOMS[index];
-    this.setLightFactor(def.night ? 0.55 : 1);
+    this.setLightFactor(def.night ? 0.55 : def.outdoor ? 0.78 : 0.92);
     (this.scene.background as THREE.Color).setHex(def.sky);
     this.boundW = def.w ?? ROOM_W;
     this.boundD = def.d ?? ROOM_D;
@@ -433,7 +415,7 @@ export class GameEngineService {
     this.heading = Math.PI;
     this.idleT = 0;
     this.reminders = 0;
-    if (def.id === 'recreio' && this.pets.size === 0) this.togglePet('cachorro'); // o cachorro vem brincar
+    if (def.id === 'recreio' && this.pets.size === 0) this.togglePet('cachorro');
     this.sleeping = !!def.sleepStart;
     this.ngZone.run(() => {
       this.routine.sleeping.set(this.sleeping);
@@ -442,7 +424,9 @@ export class GameEngineService {
     });
     if (this.sleeping) this.placeInBed();
 
-    this.placePetsNear();
+    const outdoor = !!this.routine.room()?.outdoor;
+    this.pets.forEach((pet) => (pet.root.visible = outdoor));
+    if (outdoor) this.placePetsNear();
     this.camSnap = true;
   }
 
@@ -491,7 +475,7 @@ export class GameEngineService {
     return { g, arrow, ring };
   }
 
-  /** Pontinhos que mostram o caminho até o objetivo (ajuda forte, some aos poucos) */
+  /** Pontinhos que mostram o caminho até o objetivo */
   private buildGuide(): void {
     const mat = new THREE.MeshBasicMaterial({ color: 0xfacc15, transparent: true, opacity: 0.85, depthWrite: false });
     for (let i = 0; i < 14; i++) {
@@ -528,7 +512,6 @@ export class GameEngineService {
     }
     const steps = this.routine.room().steps;
 
-    // lembra a instrução se a criança demorar (no máximo 2 vezes por etapa)
     const key = `${this.routine.roomIndex()}:${cands.join(',')}`;
     if (key !== this.lastStepKey) {
       this.lastStepKey = key;
@@ -543,20 +526,17 @@ export class GameEngineService {
     }
 
     const only = cands.length === 1 ? steps[cands[0]] : null;
-    // acordar: começa ao mexer no joystick/teclas
     if (only && only.trigger === 'move' && this.sleeping) {
       this.hideMarkers();
       if (this.inputActive) this.startAction(only, cands[0]);
       return;
     }
-    // etapas automáticas (ex.: dentista): começam sozinhas depois de um instante
     if (only && only.auto) {
       this.hideMarkers();
       if (this.idleT > 2.2) this.startAction(only, cands[0]);
       return;
     }
 
-    // quanto de ajuda mostrar (diminui conforme a criança vai ficando independente)
     const lvl = this.progress.profile().prompt;
     const showMarker = lvl >= 2 || (lvl === 1 && this.idleT > 6) || (lvl === 0 && this.idleT > 18);
     const showGuide = lvl >= 3 || this.idleT > 10;
@@ -583,7 +563,6 @@ export class GameEngineService {
       }
     });
 
-    // pontinhos até o objetivo mais próximo
     const tgt = nearest >= 0 ? steps[nearest] : undefined;
     this.guide.forEach((g, k) => {
       if (!tgt || !showGuide || nearestD < 1.6) {
@@ -599,7 +578,6 @@ export class GameEngineService {
       );
     });
 
-    // chegou perto de uma etapa: começa
     if (!this.sleeping && !this.locked) {
       for (const i of cands) {
         const st = steps[i];
@@ -611,7 +589,6 @@ export class GameEngineService {
     }
   }
 
-  /** "Mostre-me": anda até o lugar e faz a ação */
   private walkDemo(dt: number): void {
     const d = this.demoStep!;
     const s = d.step;
@@ -660,10 +637,9 @@ export class GameEngineService {
     const p = Math.min(1, a.t / a.action.duration);
     this.root.updateMatrixWorld(true);
 
-    this.handReq = {}; // as ações pedem as mãos a cada quadro
+    this.handReq = {};
     a.ctx.moving = false;
 
-    // aproxima do ponto certo e olha para o móvel
     if (!a.action.ownsMove) {
       const k = 1 - Math.exp(-10 * dt);
       this.root.position.x += (a.step.x - this.root.position.x) * k;
@@ -679,7 +655,7 @@ export class GameEngineService {
     this.isRunning = false;
 
     a.action.update(a.ctx, p, dt);
-    this.isMoving = a.ctx.moving || (!a.action.ownsMove && a.t < 0.3); // anda até o ponto
+    this.isMoving = a.ctx.moving || (!a.action.ownsMove && a.t < 0.3);
 
     const q = Math.round(p * 50);
     if (q !== this.lastProgress) {
@@ -692,8 +668,9 @@ export class GameEngineService {
   private finishAction(): void {
     const a = this.act!;
     this.act = undefined;
+    this.forcedAnim = undefined;
     this.resetPose();
-    a.action.end?.(a.ctx); // depois do reset: ex.: o ônibus mantém a criança escondida
+    a.action.end?.(a.ctx);
     this.isMoving = false;
     this.handReq = {};
     this.cheer = 1.4;
@@ -736,14 +713,15 @@ export class GameEngineService {
       time: 0,
       moving: false,
       state,
+      setAnim: (anim) => (this.forcedAnim = anim),
       at: (fx, fy, fz) => this.root.localToWorld(new THREE.Vector3(fx * H, fy * H, fz * H)),
       held: () => this.held,
       hold: (o) => {
         if (this.held && this.held !== o) this.held.parent?.remove(this.held);
         this.root.attach(o);
-        o.position.set(0, 0.55 * H, 0.3 * H);
+        o.position.set(0, 0.56 * H, 0.28 * H);
         o.rotation.set(0, 0, 0);
-        o.scale.setScalar(Math.max(0.6, H / 1.8));
+        o.scale.setScalar(0.65);
         this.held = o;
       },
       release: () => {
@@ -850,19 +828,32 @@ export class GameEngineService {
     this.topMats = [];
 
     try {
-      // Humanos: Quaternius .gltf (animações já vêm dentro do arquivo)
-      const gltf = await new GLTFLoader().loadAsync(`assets/models/${type}.gltf`);
+      const model = await new FBXLoader().loadAsync(`assets/models/${type}.fbx`);
       if (token !== this.loadToken) return;
 
-      const model = gltf.scene;
+      // Normaliza altura do personagem Mixamo para o mundo do jogo
+      model.updateMatrixWorld(true);
+      const rawBox = new THREE.Box3().setFromObject(model, true);
+      const rawH = rawBox.max.y - rawBox.min.y;
+      const targetH = type === 'menina' ? 1.68 : 1.78;
+      if (isFinite(rawH) && rawH > 0) {
+        model.scale.multiplyScalar(targetH / rawH);
+        model.updateMatrixWorld(true);
+        const scaledBox = new THREE.Box3().setFromObject(model, true);
+        model.position.y -= scaledBox.min.y;
+        this.charH = targetH;
+      }
+
       this.prepareMeshes(model);
-      this.applyOutfit(model, type);
+      this.collectTopMaterials(model);
 
       this.model = model;
       this.root.add(model);
 
-      this.addRoyalAccessories(model, type); // mede a altura (charH) e cria coroa/saia/capa
-      this.setupClips(model, gltf.animations);
+      this.addRoyalAccessories(model, type);
+      await this.loadMixamoAnimations(model, token);
+      if (token !== this.loadToken) return;
+
       this.setTopColor(this.progress.settings().topColor);
       this.findArms(model);
       if (this.sleeping) this.placeInBed();
@@ -882,38 +873,17 @@ export class GameEngineService {
     });
   }
 
-  private applyOutfit(model: THREE.Object3D, type: CharacterType): void {
-    const outfit = OUTFITS[type];
-    if (!outfit) return;
-
-    const parts = Object.keys(MATERIAL_KEYWORDS) as OutfitPart[];
-
+  private collectTopMaterials(model: THREE.Object3D): void {
     model.traverse((c) => {
       const mesh = c as THREE.Mesh;
       if (!mesh.isMesh) return;
-
-      const isArray = Array.isArray(mesh.material);
-      const mats = (isArray ? mesh.material : [mesh.material]) as THREE.Material[];
-      const meshName = mesh.name.toLowerCase();
-
-      const recolored = mats.map((mat) => {
-        const matName = mat.name.toLowerCase();
-        if (PROTECTED.test(matName)) return mat;
-
-        let part = parts.find((p) => outfit[p] !== undefined && MATERIAL_KEYWORDS[p].some((k) => matName.includes(k)));
-        if (!part) {
-          part = parts.find((p) => outfit[p] !== undefined && MESH_KEYWORDS[p].some((k) => meshName.includes(k)));
+      const mats = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.MeshStandardMaterial[];
+      mats.forEach((mat) => {
+        if (!mat || PROTECTED.test(mat.name)) return;
+        if (MATERIAL_KEYWORDS.top.some((k) => mat.name.toLowerCase().includes(k))) {
+          this.topMats.push(mat);
         }
-        if (!part) return mat;
-
-        const copy = mat.clone() as THREE.MeshStandardMaterial; // clone: não afeta outros modelos
-        if (!copy.color) return mat;
-        copy.color.setHex(outfit[part] as number);
-        if (part === 'top') this.topMats.push(copy); // a "troca de roupa" muda esta cor
-        return copy;
       });
-
-      mesh.material = isArray ? recolored : recolored[0];
     });
   }
 
@@ -926,10 +896,9 @@ export class GameEngineService {
       const found = bones.find((b) => p.test(b.name) && !(exclude && exclude.test(b.name)));
       if (found) return found;
     }
-    return model; // sem osso: fica fixo no modelo
+    return model;
   }
 
-  // Prende um objeto a um osso, mantendo a posição de mundo e a orientação "em pé"
   private attachToBone(obj: THREE.Object3D, bone: THREE.Object3D, worldPos: THREE.Vector3): void {
     bone.updateWorldMatrix(true, false);
     const q = new THREE.Quaternion();
@@ -946,12 +915,10 @@ export class GameEngineService {
     bone.add(obj);
   }
 
-  // Coroa (todos), saia (menina) e capa (menino)
   private addRoyalAccessories(model: THREE.Object3D, type: CharacterType): void {
     const style = ROYAL[type];
     if (!style) return;
 
-    // Mede com o personagem em pé e virado para frente, depois restaura
     const savedRot = this.root.rotation.clone();
     const savedScale = this.root.scale.clone();
     this.root.rotation.set(0, 0, 0);
@@ -989,18 +956,7 @@ export class GameEngineService {
     const head = this.findBone(model, [/^head$/i, /head/i], /top|end|tip/i);
     this.attachToBone(crown, head, new THREE.Vector3(cx, box.max.y - 0.005 * H, cz));
 
-    // --- Saia (princesa)
-    if (style.skirt !== undefined) {
-      const skirtH = 0.3 * H;
-      const skirt = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.1 * H, 0.23 * H, skirtH, 20, 1, true),
-        new THREE.MeshStandardMaterial({ color: style.skirt, roughness: 0.7, side: THREE.DoubleSide })
-      );
-      const hips = this.findBone(model, [/hips/i, /pelvis/i]);
-      this.attachToBone(skirt, hips, new THREE.Vector3(cx, y(0.54) - skirtH / 2, cz));
-    }
-
-    // --- Capa (príncipe): fica nas costas (-Z, o personagem olha para +Z)
+    // --- Capa (príncipe)
     if (style.cape !== undefined) {
       const capeH = 0.42 * H;
       const cape = new THREE.Mesh(
@@ -1016,36 +972,47 @@ export class GameEngineService {
 
   // ---------------------------------------------------------------- ANIMAÇÕES
 
-  private setupClips(model: THREE.Object3D, clips: THREE.AnimationClip[]): void {
-    if (!clips.length) {
-      console.warn('Este arquivo não tem animações.');
-      return;
-    }
+  private async loadMixamoAnimations(model: THREE.Object3D, token: number): Promise<void> {
     this.mixer = new THREE.AnimationMixer(model);
+    const loader = new FBXLoader();
+    const animNames: AnimName[] = ['idle', 'walk', 'run', 'sit', 'angry'];
 
-    (Object.keys(ANIM_PATTERNS) as AnimName[]).forEach((name) => {
-      const clip = this.findClip(clips, ANIM_PATTERNS[name], name);
-      if (clip) this.actions[name] = this.mixer!.clipAction(clip);
-      else console.warn(`Animação "${name}" não encontrada. Ajuste ANIM_PATTERNS.`);
+    const boneNames: string[] = [];
+    model.traverse((o) => {
+      if ((o as THREE.Bone).isBone) boneNames.push(o.name);
     });
+    const usesColon = boneNames.some((n) => n.includes(':'));
 
-    // Passo um pouco mais rápido e vivo (estilo Roblox)
+    await Promise.all(
+      animNames.map(async (name) => {
+        try {
+          let baseClip = this.clipCache.get(name);
+          if (!baseClip) {
+            const animFbx = await loader.loadAsync(`assets/models/${name}.fbx`);
+            if (!animFbx.animations.length) return;
+            baseClip = animFbx.animations[0].clone();
+            baseClip.name = name;
+            baseClip.tracks = baseClip.tracks.filter((t) => !/Hips\.position$/i.test(t.name));
+            this.clipCache.set(name, baseClip);
+          }
+          if (token !== this.loadToken || !this.mixer) return;
+
+          const clip = baseClip.clone();
+          clip.tracks.forEach((t) => {
+            t.name = usesColon
+              ? t.name.replace(/^mixamorig(?!:)/, 'mixamorig:')
+              : t.name.replace(/^mixamorig:/, 'mixamorig');
+          });
+          this.actions[name] = this.mixer.clipAction(clip);
+        } catch (err) {
+          console.warn(`Animação ${name}.fbx não carregada:`, err);
+        }
+      })
+    );
+
     if (this.actions.walk) this.actions.walk.timeScale = 1.2;
     if (this.actions.run) this.actions.run.timeScale = 1.1;
-
     this.playAnim('idle');
-  }
-
-  private findClip(clips: THREE.AnimationClip[], patterns: RegExp[], name: AnimName) {
-    for (const p of patterns) {
-      const found = clips.find((c) => {
-        if (!p.test(c.name)) return false;
-        if (name === 'walk' && /run|sprint/i.test(c.name)) return false; // "walk" não pega "run"
-        return true;
-      });
-      if (found) return found;
-    }
-    return undefined;
   }
 
   private playAnim(name: AnimName): void {
@@ -1065,7 +1032,7 @@ export class GameEngineService {
     this.animationFrameId = requestAnimationFrame(this.gameLoop);
     const dt = Math.min(this.clock.getDelta(), 0.05);
     if (this.routine.paused()) {
-      this.renderer.render(this.scene, this.camera); // pausa (cantinho da calma)
+      this.renderer.render(this.scene, this.camera);
       return;
     }
 
@@ -1074,13 +1041,15 @@ export class GameEngineService {
     this.updateRoutine(dt);
     this.applyPose();
 
-    this.playAnim(!this.isMoving ? 'idle' : this.isRunning ? 'run' : 'walk');
+    this.playAnim(this.forcedAnim ?? (!this.isMoving ? 'idle' : this.isRunning ? 'run' : 'walk'));
     this.mixer?.update(dt);
     this.animateHumanExtras(dt);
     this.applyHands(dt);
 
     this.cheer = Math.max(0, this.cheer - dt);
     this.updatePets(dt);
+    const roomMixers = this.roomGroup?.userData['mixers'] as THREE.AnimationMixer[] | undefined;
+    roomMixers?.forEach((m) => m.update(dt));
     this.animateAmbient(dt);
     this.fx.update(dt);
 
@@ -1095,10 +1064,9 @@ export class GameEngineService {
 
     const joyMag = Math.hypot(this.joy.x, this.joy.y);
     if (joyMag > 0.15) {
-      // Joystick virtual (celular)
       mx = this.joy.x;
       mz = this.joy.y;
-      run = joyMag > 0.92; // empurrar até o fim = correr
+      run = joyMag > 0.92;
     } else {
       if (this.keys['w'] || this.keys['arrowup']) mz -= 1;
       if (this.keys['s'] || this.keys['arrowdown']) mz += 1;
@@ -1122,7 +1090,7 @@ export class GameEngineService {
     this.isMoving = this.inputActive;
     if (!this.isMoving) return;
 
-    const len = Math.hypot(mx, mz); // diagonal não fica mais rápida
+    const len = Math.hypot(mx, mz);
     mx /= len;
     mz /= len;
     this.heading = Math.atan2(mx, mz);
@@ -1137,7 +1105,6 @@ export class GameEngineService {
     this.root.rotation.y += diff * (1 - Math.exp(-14 * dt));
   }
 
-  // Limites da sala + móveis (círculo contra retângulos). Serve para o personagem e os pets.
   private resolveCollisions(p: THREE.Vector3, r: number): void {
     p.x = Math.min(this.boundW / 2 - 0.7, Math.max(-this.boundW / 2 + 0.7, p.x));
     p.z = Math.min(this.boundD / 2 - 0.7, Math.max(-this.boundD / 2 + 0.7, p.z));
@@ -1167,7 +1134,6 @@ export class GameEngineService {
     }
   }
 
-  // Toque "Roblox" por cima da animação do pacote: inclinação pra frente e quique
   private animateHumanExtras(dt: number): void {
     const m = this.model;
     if (!m) return;
@@ -1176,16 +1142,13 @@ export class GameEngineService {
       this.petCycle += dt * (this.isRunning ? 14 : 9);
       const lean = this.isRunning ? 0.14 : 0.06;
       m.rotation.x += (lean - m.rotation.x) * (1 - Math.exp(-10 * dt));
-      m.position.y = Math.abs(Math.sin(this.petCycle)) * (this.isRunning ? 0.08 : 0.04);
     } else {
       m.rotation.x += (0 - m.rotation.x) * (1 - Math.exp(-10 * dt));
-      m.position.y += (0 - m.position.y) * (1 - Math.exp(-10 * dt));
     }
   }
 
   // ---------------------------------------------------------------- BRAÇOS (IK)
 
-  /** Procura ombro, cotovelo e mão de cada lado, pelo nome dos ossos */
   private findArms(model: THREE.Object3D): void {
     this.arms = {};
     const bones: THREE.Object3D[] = [];
@@ -1226,18 +1189,16 @@ export class GameEngineService {
     }
   }
 
-  /** Mãos pedidas pelas ações (ou seguindo o objeto que a criança segura) */
   private applyHands(dt: number): void {
     if (!this.arms.l && !this.arms.r) return;
     const req = this.handReq;
     const H = this.charH;
 
-    // segurando algo sem pedido específico: as duas mãos acompanham o objeto
-    if (!req.l && !req.r && this.held && !this.sleeping) {
+    if (!req.l && !req.r && this.held && !this.sleeping && this.forcedAnim !== 'sit') {
       const hp = this.held.getWorldPosition(new THREE.Vector3());
       const xAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(this.root.getWorldQuaternion(new THREE.Quaternion()));
-      req.l = { p: hp.clone().add(xAxis.clone().multiplyScalar(0.12 * H)), w: 0.85 };
-      req.r = { p: hp.clone().sub(xAxis.clone().multiplyScalar(0.12 * H)), w: 0.85 };
+      req.l = { p: hp.clone().add(xAxis.clone().multiplyScalar(0.07 * H)), w: 1 };
+      req.r = { p: hp.clone().sub(xAxis.clone().multiplyScalar(0.07 * H)), w: 1 };
     }
 
     this.root.updateMatrixWorld(true);
@@ -1258,11 +1219,10 @@ export class GameEngineService {
     d = Math.min(Math.max(d, Math.abs(arm.a - arm.b) + 0.02), (arm.a + arm.b) * 0.995);
     const dir = toT.normalize();
 
-    // lei dos cossenos: onde fica o cotovelo
     const cosA = THREE.MathUtils.clamp((arm.a * arm.a + d * d - arm.b * arm.b) / (2 * arm.a * d), -1, 1);
     const angA = Math.acos(cosA);
     const rq = this.root.getWorldQuaternion(new THREE.Quaternion());
-    const pole = new THREE.Vector3(sideSign * 0.3, -1, -0.5).applyQuaternion(rq); // cotovelo para baixo e para fora
+    const pole = new THREE.Vector3(sideSign * 0.85, -1.0, 0.1).applyQuaternion(rq);
     const perp = pole.sub(dir.clone().multiplyScalar(pole.dot(dir)));
     if (perp.lengthSq() < 1e-6) perp.set(0, -1, 0);
     perp.normalize();
@@ -1273,7 +1233,6 @@ export class GameEngineService {
     this.aimBone(arm.lower, arm.hand, hand, w);
   }
 
-  /** Gira `bone` para que o osso filho aponte para `desired` (sem depender dos eixos do modelo) */
   private aimBone(bone: THREE.Object3D, child: THREE.Object3D, desired: THREE.Vector3, w: number): void {
     bone.updateWorldMatrix(true, false);
     child.updateWorldMatrix(true, false);
@@ -1289,7 +1248,6 @@ export class GameEngineService {
     bone.updateMatrixWorld(true);
   }
 
-  // Detalhes vivos do cenário (ex.: o "Zzz" balançando)
   private animateAmbient(dt: number): void {
     const z = this.props['zzz'];
     if (z && z.visible) z.position.y = 2.6 + Math.sin(this.clock.elapsedTime * 2) * 0.12;
@@ -1301,12 +1259,14 @@ export class GameEngineService {
     const pet: Pet = { type, root: new THREE.Group(), cycle: 0, idle: 0, moving: false, fast: false };
     this.pets.set(type, pet);
     this.scene.add(pet.root);
-    this.placePetsNear();
+    const outdoor = !!this.routine.room()?.outdoor;
+    this.pets.forEach((pet) => (pet.root.visible = outdoor));
+    if (outdoor) this.placePetsNear();
 
     new FBXLoader()
       .loadAsync(`assets/models/${type}.fbx`)
       .then((fbx) => {
-        if (this.pets.get(type) !== pet) return; // foi dispensado enquanto carregava
+        if (this.pets.get(type) !== pet) return;
         fbx.scale.setScalar(0.004);
         this.prepareMeshes(fbx);
         pet.model = fbx;
@@ -1338,7 +1298,7 @@ export class GameEngineService {
     this.pets.forEach((pet) => {
       const idx = i++;
       if (pet.controlled) {
-        this.animatePet(pet, dt); // a ação (ex.: buscar a bola) move o bichinho
+        this.animatePet(pet, dt);
         return;
       }
       const side = idx % 2 === 0 ? -1 : 1;
@@ -1363,7 +1323,7 @@ export class GameEngineService {
         pet.fast = speed > WALK_SPEED * 1.4;
         yawTarget = Math.atan2(dx, dz);
       } else {
-        yawTarget = Math.atan2(p.x - pos.x, p.z - pos.z); // parado: olha para o dono
+        yawTarget = Math.atan2(p.x - pos.x, p.z - pos.z);
       }
       this.resolveCollisions(pos, PET_RADIUS);
 
@@ -1376,7 +1336,6 @@ export class GameEngineService {
     });
   }
 
-  // Pets (malha estática): pulinho, balanço, squash e festinha quando a etapa termina
   private animatePet(pet: Pet, dt: number): void {
     const m = pet.model;
     if (!m) return;
@@ -1415,11 +1374,10 @@ export class GameEngineService {
   private updateCamera(dt: number): void {
     const p = this.root.position;
     const py = this.sleeping ? 0 : p.y;
-    // celular em pé (tela estreita): afasta a câmera para caber a cena
     const zoom = Math.min(1.9, Math.max(1, 1.05 / this.camera.aspect));
     this.camTarget.set(p.x, py + this.camOff[0] * zoom, p.z + this.camOff[1] * zoom);
     if (this.camSnap) {
-      this.camera.position.copy(this.camTarget); // sem "voar" ao trocar de sala
+      this.camera.position.copy(this.camTarget);
       this.camSnap = false;
     } else {
       this.camera.position.lerp(this.camTarget, 1 - Math.exp(-8 * dt));

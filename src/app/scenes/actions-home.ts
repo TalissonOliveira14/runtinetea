@@ -40,7 +40,7 @@ export const HOME_ACTIONS: Partial<Record<ActionId, Action>> = {
       const k = ease(seg(p, 0.2, 0.7));
       c.root.rotation.y = c.faceYaw + Math.PI * 2 * k;
       c.pose.y = Math.sin(Math.PI * k) * 0.2;
-      c.reach('r', c.at(-0.15, 0.7, 0.52), p < 0.22 ? 1 : 0);
+      c.reach('r', c.at(-0.12, 0.65, 0.45), p < 0.22 ? 0.8 : 0);
       if (p > 0.2) c.once('w', () => c.audio.sfx('whoosh'));
       if (p > 0.45)
         c.once('color', () => {
@@ -72,8 +72,8 @@ export const HOME_ACTIONS: Partial<Record<ActionId, Action>> = {
       c.pose.lean = 0.35 * Math.sin(Math.PI * seg(p, 0, 0.35));
       if (p < 0.3) {
         const w = pk.getWorldPosition(new THREE.Vector3()).add(V(0, 0.45, 0));
-        c.reach('l', w, 1);
-        c.reach('r', w, 1);
+        c.reach('l', w, 0.8);
+        c.reach('r', w, 0.8);
       }
       if (!c.state.worn) {
         const k = ease(seg(p, 0.25, 0.72));
@@ -140,11 +140,11 @@ export const HOME_ACTIONS: Partial<Record<ActionId, Action>> = {
       c.pose.lean = 0.12;
       c.pose.sway = Math.sin(c.time * 14) * 0.05;
       if (p > 0.12 && p < 0.85) {
-        const hp = c.at(Math.sin(c.time * 14) * 0.05, 0.5, 0.33);
-        c.reach('l', hp.clone().add(V(0.08, 0, 0)), 1);
-        c.reach('r', hp.clone().add(V(-0.08, 0, 0)), 1);
+        const hp = c.at(Math.sin(c.time * 14) * 0.05, 0.55, 0.3);
+        c.reach('l', hp.clone().add(V(0.07, 0, 0)), 0.8);
+        c.reach('r', hp.clone().add(V(-0.07, 0, 0)), 0.8);
         c.every('f', dt, 0.07, () => {
-          const w = c.at(rnd() * 0.3, 0.5, 0.33);
+          const w = c.at(rnd() * 0.3, 0.55, 0.3);
           c.fx.foam.emit(w.x, w.y, w.z, rnd() * 0.3, 0.5, rnd() * 0.3, 0xffffff, 0.9);
         });
         c.every('s', dt, 0.2, () => c.audio.sfx('scrub'));
@@ -173,7 +173,7 @@ export const HOME_ACTIONS: Partial<Record<ActionId, Action>> = {
       b.rotation.z = scrub * 4;
       c.pose.lean = 0.06;
       if (p > 0.1 && p < 0.75) {
-        c.reach('r', c.at(0, 0.86, 0.15), 1);
+        c.reach('r', c.at(0, 0.86, 0.15), 0.85);
         c.every('f', dt, 0.1, () => {
           const w = c.at(rnd() * 0.05, 0.84, 0.19);
           c.fx.foam.emit(w.x, w.y, w.z, rnd() * 0.3, 0.4, rnd() * 0.3, 0xffffff, 0.8);
@@ -213,8 +213,8 @@ export const HOME_ACTIONS: Partial<Record<ActionId, Action>> = {
       c.every('st', dt, 0.1, () => c.fx.steam.emit(sx + rnd() * 0.8, 0.8 + Math.random(), sz + rnd() * 0.6, rnd() * 0.2, 0.5, rnd() * 0.2, 0xffffff, 1.6));
       c.pose.sway = Math.sin(c.time * 5) * 0.04;
       if (p > 0.2 && p < 0.7) {
-        c.reach('l', c.at(0.12, 1.0, 0.08), 1);
-        c.reach('r', c.at(-0.12, 1.0, 0.08), 1);
+        c.reach('l', c.at(0.12, 0.95, 0.12), 0.75);
+        c.reach('r', c.at(-0.12, 0.95, 0.12), 0.75);
       }
       c.pose.y = Math.abs(Math.sin(c.time * 4)) * 0.03;
       if (p > 0.2 && p < 0.7) {
@@ -244,10 +244,11 @@ export const HOME_ACTIONS: Partial<Record<ActionId, Action>> = {
       const open = ease(seg(p, 0, 0.2)) * (1 - ease(seg(p, 0.78, 0.96)));
       c.props['fridgeDoor'].rotation.y = 1.8 * open;
       const apple = c.props['apple'];
-      if (p < 0.66) c.reach('r', apple.getWorldPosition(new THREE.Vector3()), seg(p, 0.05, 0.25));
+      if (p < 0.66) c.reach('r', apple.getWorldPosition(new THREE.Vector3()), seg(p, 0.05, 0.25) * 0.8);
       if (!c.state.held) {
         const k = ease(seg(p, 0.25, 0.65));
-        fly(apple, c.state.from, c.at(0, 0.55, 0.3), k, 0.6);
+        fly(apple, c.state.from, c.at(0, 0.62, 0.22), k, 0.5);
+        apple.scale.setScalar(lerp(1, 0.65, k));
         apple.rotation.y = k * 6;
       }
       if (p >= 0.65)
@@ -255,7 +256,7 @@ export const HOME_ACTIONS: Partial<Record<ActionId, Action>> = {
           c.state.held = true;
           c.hold(apple);
           c.audio.sfx('pop');
-          c.fx.sparkle(c.at(0, 0.55, 0.3), 12);
+          c.fx.sparkle(c.at(0, 0.62, 0.22), 12);
         });
       c.pose.y = Math.sin(Math.PI * seg(p, 0.65, 0.8)) * 0.1;
       if (p > 0.82) c.once('close', () => c.audio.sfx('close'));
@@ -267,46 +268,85 @@ export const HOME_ACTIONS: Partial<Record<ActionId, Action>> = {
   },
 
   eat: {
-    duration: 6.4,
+    duration: 6.8,
+    ownsMove: true,
     start(c) {
-      c.state.plateFrom = c.props['plate'].position.clone();
+      const plate = c.props['plate'];
+      plate.position.set(0.55, 1.0, -0.5);
+      c.state.plateTable = plate.position.clone();
+      c.state.startPos = c.root.position.clone();
+      c.state.seatPos = V(-0.48, -0.36, -0.5);
     },
     update(c, p) {
-      const H = c.H;
+      const plate = c.props['plate'];
       const apple = c.held();
-      if (apple && !c.state.eaten) {
+
+      // 1. Senta na cadeira esquerda da mesa
+      if (p < 0.12) {
+        const k = ease(seg(p, 0, 0.12));
+        c.root.position.lerpVectors(c.state.startPos, c.state.seatPos, k);
+        c.root.rotation.y = lerp(c.faceYaw, Math.PI / 2, k);
+        c.moving = true;
+      } else if (p < 0.82) {
+        c.moving = false;
+        c.root.position.copy(c.state.seatPos);
+        c.root.rotation.y = Math.PI / 2;
+        c.setAnim('sit');
+      }
+
+      // 2. Come a maçã sentado à mesa (3 mordidas)
+      if (apple && !c.state.eaten && p >= 0.12 && p < 0.8) {
         let m = 0;
         for (let i = 0; i < 3; i++) {
-          const s = 0.08 + 0.23 * i;
-          m = Math.max(m, Math.sin(Math.PI * seg(p, s, s + 0.23)));
-          if (p > s + 0.115)
+          const s = 0.16 + 0.2 * i;
+          m = Math.max(m, Math.sin(Math.PI * seg(p, s, s + 0.2)));
+          if (p > s + 0.1)
             c.once('bite' + i, () => {
-              apple.scale.multiplyScalar(0.72);
+              apple.scale.multiplyScalar(0.75);
               c.audio.sfx('munch');
-              const w = c.at(0, 0.86, 0.2);
+              const w = c.at(0, 0.68, 0.22);
               c.fx.spark.burst(w.x, w.y, w.z, 8, [0xef4444, 0xfef3c7], 1.5, 0.6);
             });
         }
-        apple.position.set(0, lerp(0.55, 0.88, m) * H, lerp(0.3, 0.16, m) * H);
-        c.pose.y = p > 0.08 && p < 0.8 ? Math.abs(Math.sin(c.time * 16)) * 0.03 : 0;
-        c.pose.lean = 0.05;
+        const tablePos = V(0.55, 1.05, -0.5);
+        const mouthPos = c.at(0, 0.68, 0.22);
+        const wp = tablePos.clone().lerp(mouthPos, m);
+        apple.position.copy(c.root.worldToLocal(wp.clone()));
+        c.reach('r', wp, 0.85);
+        c.reach('l', V(0.45, 1.03, -0.35), 0.65);
       }
-      if (p > 0.82) {
+
+      // 3. Termina, levanta da cadeira e pega o prato para levar à pia
+      if (p >= 0.8) {
         c.once('gone', () => {
           c.discard();
           c.state.eaten = true;
-          c.props['plate'].userData['crumbs'].visible = true;
-          c.fx.popup('😋', c.at(0, 1.3, 0.1), 1.6, 1.0);
+          plate.userData['crumbs'].visible = true;
+          c.fx.popup('😋', c.at(0, 1.1, 0.1), 1.6, 1.0);
           c.audio.sfx('pop');
         });
-        const plate = c.props['plate'];
-        if (!c.state.plateHeld) fly(plate, c.state.plateFrom, c.at(0, 0.55, 0.3), ease(seg(p, 0.82, 0.98)), 0.5);
+        c.setAnim(undefined);
+        const kStand = ease(seg(p, 0.8, 0.9));
+        c.root.position.lerpVectors(c.state.seatPos, V(-0.45, 0, 0.45), kStand);
+        c.root.rotation.y = lerp(Math.PI / 2, 0.6, kStand);
+        c.moving = p < 0.9;
+
+        if (!c.state.plateHeld) {
+          const kPlate = ease(seg(p, 0.86, 0.98));
+          fly(plate, c.state.plateTable, c.at(0, 0.62, 0.22), kPlate, 0.35);
+          if (kPlate > 0) c.reach('r', plate.getWorldPosition(new THREE.Vector3()), 0.8);
+        }
         if (p >= 0.98)
           c.once('ph', () => {
             c.state.plateHeld = true;
             c.hold(plate);
           });
       }
+    },
+    end(c) {
+      c.setAnim(undefined);
+      c.root.position.set(-0.45, 0, 0.55);
+      if (!c.state.plateHeld) c.hold(c.props['plate']);
     },
   },
 
@@ -319,55 +359,59 @@ export const HOME_ACTIONS: Partial<Record<ActionId, Action>> = {
     },
     update(c, p, dt) {
       const pl = c.state.plate as THREE.Object3D;
-      const sink = V(3.5, 1.55, -3.85);
+      const sink = V(3.5, 1.08, -3.95);
       const pw = pl.getWorldPosition(new THREE.Vector3());
-      c.reach('l', pw.clone().add(V(0.15, 0, 0)), 1);
-      c.reach('r', pw.clone().add(V(-0.15, 0, 0)), 1);
-      const rack = V(4.7, 1.12, -4.0);
-      if (p < 0.85) {
-        const k = ease(seg(p, 0, 0.2));
-        fly(pl, c.state.from, sink, k, 0.3);
-        pl.rotation.x = k * 0.5 + Math.sin(c.time * 10) * 0.05 * k;
+      c.reach('l', pw.clone().add(V(0.12, 0.04, 0)), 0.8);
+      c.reach('r', pw.clone().add(V(-0.12, 0.04, 0)), 0.8);
+
+      if (p < 0.82) {
+        const k = ease(seg(p, 0, 0.18));
+        fly(pl, c.state.from, sink, k, 0.25);
+        pl.rotation.x = k * 0.35 + Math.sin(c.time * 12) * 0.06 * k;
       } else {
-        const k = ease(seg(p, 0.85, 1));
-        fly(pl, sink, rack, k, 0.4);
-        pl.rotation.x = 0.5 * (1 - k);
+        // Depois de lavar, ergue o prato limpo para carregar até o armário
+        const k = ease(seg(p, 0.82, 1));
+        fly(pl, sink, c.at(0, 0.62, 0.22), k, 0.3);
+        pl.rotation.x = 0.35 * (1 - k);
       }
-      if (p > 0.2 && p < 0.85) {
+
+      if (p > 0.18 && p < 0.82) {
         c.every('w', dt, 0.02, () => drop(c, 3.5 + rnd() * 0.04, 1.38, -4.3, 0, 0.1, 0.1, 0.35));
-        c.every('f', dt, 0.08, () => c.fx.foam.emit(3.5 + rnd() * 0.3, 1.6, -3.85 + rnd() * 0.2, rnd() * 0.2, 0.4, rnd() * 0.2, 0xffffff, 0.9));
+        c.every('f', dt, 0.08, () => c.fx.foam.emit(3.5 + rnd() * 0.25, 1.15, -3.95 + rnd() * 0.2, rnd() * 0.2, 0.4, rnd() * 0.2, 0xffffff, 0.9));
         c.every('s', dt, 0.2, () => c.audio.sfx('scrub'));
       }
       if (p > 0.6) pl.userData['crumbs'].visible = false;
       c.pose.lean = 0.12;
       c.pose.sway = Math.sin(c.time * 14) * 0.04;
-      if (p > 0.93)
+      if (p > 0.9)
         c.once('end', () => {
           c.audio.water(false);
           c.audio.sfx('sparkle');
-          c.fx.sparkle(rack.clone().add(V(0, 0.3, 0)), 16);
+          c.fx.sparkle(c.at(0, 0.75, 0.25), 16);
         });
     },
     end(c) {
       c.audio.water(false);
       const pl = c.state.plate as THREE.Object3D;
-      pl.position.set(4.7, 1.12, -4.0);
-      pl.rotation.set(0, 0, 0);
+      c.hold(pl); // mantém o prato nas mãos enquanto caminha até o armário
     },
   },
 
   cabinet: {
     duration: 4.4,
     start(c) {
-      c.state.from = c.props['plate'].position.clone();
+      const pl = c.release() ?? c.props['plate'];
+      c.state.plate = pl;
+      c.state.from = pl.position.clone();
       c.audio.sfx('open');
     },
     update(c, p) {
+      const pl = c.state.plate as THREE.Object3D;
       const open = ease(seg(p, 0, 0.2)) * (1 - ease(seg(p, 0.78, 0.95)));
       c.props['cabL'].rotation.y = -1.6 * open;
       c.props['cabR'].rotation.y = 1.6 * open;
-      fly(c.props['plate'], c.state.from, V(6.3, 1.7, 1.5), ease(seg(p, 0.25, 0.62)), 1.5);
-      if (p > 0.25 && p < 0.62) c.reach('r', c.props['plate'].getWorldPosition(new THREE.Vector3()), 1);
+      fly(pl, c.state.from, V(6.2, 1.65, 1.5), ease(seg(p, 0.22, 0.62)), 0.55);
+      if (p > 0.15 && p < 0.62) c.reach('r', pl.getWorldPosition(new THREE.Vector3()), 0.8);
       if (p > 0.62) c.once('pop', () => c.audio.sfx('pop'));
       if (p > 0.82) c.once('close', () => c.audio.sfx('close'));
       if (p > 0.9)
@@ -396,7 +440,7 @@ export const HOME_ACTIONS: Partial<Record<ActionId, Action>> = {
         const o = c.props[n];
         const s = 0.1 + 0.26 * i;
         const k = ease(seg(p, s, s + 0.24));
-        if (k < 1 && p >= s - 0.05) c.reach('r', o.getWorldPosition(new THREE.Vector3()), 1);
+        if (k < 1 && p >= s - 0.05) c.reach('r', o.getWorldPosition(new THREE.Vector3()), 0.8);
         if (k > 0 && k < 1) {
           fly(o, c.state.from[i], box, k, 1.6);
           o.rotation.y = k * 8;
@@ -431,7 +475,7 @@ export const HOME_ACTIONS: Partial<Record<ActionId, Action>> = {
         const o = c.props[n];
         const s = 0.1 + 0.4 * i;
         const k = ease(seg(p, s, s + 0.4));
-        if (k < 1 && p >= s - 0.05) c.reach('r', o.getWorldPosition(new THREE.Vector3()), 1);
+        if (k < 1 && p >= s - 0.05) c.reach('r', o.getWorldPosition(new THREE.Vector3()), 0.8);
         if (k > 0) {
           fly(o, c.state.from[i], to[i], k, 2.2);
           o.rotation.y = lerp(i === 1 ? 0.6 : 0, Math.PI / 2, k);
@@ -498,7 +542,7 @@ export const HOME_ACTIONS: Partial<Record<ActionId, Action>> = {
     update(c, p, dt) {
       const bk = c.props['book'];
       if (p < 0.86 && !c.state.held) {
-        fly(bk, c.state.from, c.at(0, 0.62, 0.32), ease(seg(p, 0.05, 0.3)), 0.5);
+        fly(bk, c.state.from, c.at(0, 0.62, 0.22), ease(seg(p, 0.05, 0.3)), 0.5);
       }
       if (p >= 0.3 && p < 0.86)
         c.once('hold', () => {

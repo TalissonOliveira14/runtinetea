@@ -1,6 +1,9 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { emojiSprite } from './fx';
 import { ClothBlanket } from './cloth';
+import { makePack } from './action-kit';
 
 export const ROOM_W = 14; // x: -7 .. 7
 export const ROOM_D = 10; // z: -5 .. 5 (parede de fundo em z = -5, frente aberta para a câmera)
@@ -61,12 +64,40 @@ export const WORLDS = [
   { id: 4, name: 'Aventuras', icon: '🛒' },
 ];
 
+export type ModelFolder = 'furniture' | 'vehicles' | 'food' | 'props';
+
+// Cache global dos modelos .glb da Kenney para evitar recarregamento entre salas
+const gltfLoader = new GLTFLoader();
+const glbCache = new Map<string, Promise<THREE.Group>>();
+
+function loadGlb(name: string, folder: ModelFolder = 'furniture'): Promise<THREE.Group> {
+  const key = `${folder}/${name}`;
+  let cached = glbCache.get(key);
+  if (!cached) {
+    cached = gltfLoader.loadAsync(`assets/models/${key}.glb`).then((gltf) => gltf.scene);
+    glbCache.set(key, cached);
+  }
+  return cached.then((scene) => scene.clone(true));
+}
+
+export interface GlbOpts {
+  folder?: ModelFolder;
+  rotY?: number;
+  targetW?: number;
+  targetH?: number;
+  targetD?: number;
+  scale?: number;
+  collide?: boolean;
+  parent?: THREE.Object3D;
+}
+
 // ------------------------------------------------------------------ helper de construção
 
 export class Builder {
   group = new THREE.Group();
   colliders: Collider[] = [];
   props: Record<string, THREE.Object3D> = {};
+  mixers: THREE.AnimationMixer[] = [];
   private mats = new Map<number, THREE.MeshStandardMaterial>();
 
   private mat(color: number): THREE.MeshStandardMaterial {
@@ -83,6 +114,129 @@ export class Builder {
     mesh.receiveShadow = true;
     parent.add(mesh);
     return mesh;
+  }
+
+  /** Carrega um modelo .glb da Kenney, centraliza X/Z, apoia em y=0 e aplica escala/colisor */
+  glb(name: string, x: number, y: number, z: number, opts: GlbOpts = {}): THREE.Group {
+    const anchor = new THREE.Group();
+    anchor.position.set(x, y, z);
+    anchor.rotation.y = opts.rotY ?? 0;
+    (opts.parent ?? this.group).add(anchor);
+
+    if (opts.collide && opts.targetW && opts.targetD) {
+      const rot = Math.abs(Math.sin(opts.rotY ?? 0)) > 0.7;
+      const cw = rot ? opts.targetD : opts.targetW;
+      const cd = rot ? opts.targetW : opts.targetD;
+      this.col(x - cw / 2, x + cw / 2, z - cd / 2, z + cd / 2);
+    }
+
+    loadGlb(name, opts.folder ?? 'furniture')
+      .then((model) => {
+        model.traverse((c) => {
+          const m = c as THREE.Mesh;
+          if (m.isMesh) {
+            m.castShadow = true;
+            m.receiveShadow = true;
+            const mats = Array.isArray(m.material) ? m.material : [m.material];
+            mats.forEach((mat) => {
+              const sm = mat as THREE.MeshStandardMaterial;
+              if (sm.map) sm.map.colorSpace = THREE.SRGBColorSpace;
+              if (typeof sm.roughness === 'number') sm.roughness = Math.max(sm.roughness, 0.72);
+            });
+          }
+        });
+        model.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(model, true);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+
+        if (size.x > 0 && size.y > 0 && size.z > 0) {
+          if (opts.targetW || opts.targetH || opts.targetD) {
+            const sx = opts.targetW ? opts.targetW / size.x : undefined;
+            const sy = opts.targetH ? opts.targetH / size.y : undefined;
+            const sz = opts.targetD ? opts.targetD / size.z : undefined;
+            const fallback = sx ?? sy ?? sz ?? 1;
+            model.scale.set(sx ?? fallback, sy ?? fallback, sz ?? fallback);
+          } else {
+            model.scale.setScalar(opts.scale ?? 2.2);
+          }
+          model.updateMatrixWorld(true);
+          const sb = new THREE.Box3().setFromObject(model, true);
+          const center = new THREE.Vector3();
+          sb.getCenter(center);
+          model.position.set(-center.x, -sb.min.y, -center.z);
+        }
+        anchor.add(model);
+      })
+      .catch((err) => console.warn(`Modelo ${name}.glb não carregado:`, err));
+
+    return anchor;
+  }
+
+
+  /** Personagem 3D articulado (Professora, Caixa, Dentista) com animação idle */
+  npc(
+    propName: string,
+    modelType: 'menina' | 'menino',
+    x: number,
+    z: number,
+    rotY: number,
+    colors: { top?: number; pants?: number; hair?: number } = {}
+  ): THREE.Group {
+    const g = this.pivot(propName, x, 0, z);
+    g.rotation.y = rotY;
+    this.col(x - 0.35, x + 0.35, z - 0.35, z + 0.35);
+    const loader = new FBXLoader();
+    Promise.all([
+      loader.loadAsync(`assets/models/${modelType}.fbx`),
+      loader.loadAsync('assets/models/idle.fbx'),
+    ])
+      .then(([fbx, idleFbx]) => {
+        fbx.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(fbx, true);
+        const rawH = box.max.y - box.min.y;
+        if (isFinite(rawH) && rawH > 0) {
+          fbx.scale.multiplyScalar(1.88 / rawH);
+          fbx.updateMatrixWorld(true);
+          const sb = new THREE.Box3().setFromObject(fbx, true);
+          fbx.position.y -= sb.min.y;
+        }
+        fbx.traverse((c) => {
+          const mesh = c as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          mesh.frustumCulled = false;
+          const mats = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.MeshStandardMaterial[];
+          mesh.material = mats.map((m) => {
+            const cl = m.clone();
+            const n = cl.name.toLowerCase();
+            if (colors.top && /shirt|top|jacket|hoodie|torso|cloth|sweater|coat|blouse/.test(n)) cl.color.setHex(colors.top);
+            if (colors.pants && /pant|trouser|short|skirt|bottom|jean/.test(n)) cl.color.setHex(colors.pants);
+            if (colors.hair && /hair|cabelo/.test(n)) cl.color.setHex(colors.hair);
+            return cl;
+          });
+          if (Array.isArray(mesh.material) && mesh.material.length === 1) mesh.material = mesh.material[0];
+        });
+        g.add(fbx);
+        if (idleFbx.animations.length) {
+          const boneNames: string[] = [];
+          fbx.traverse((o) => { if ((o as THREE.Bone).isBone) boneNames.push(o.name); });
+          const usesColon = boneNames.some((n) => n.includes(':'));
+          const clip = idleFbx.animations[0].clone();
+          clip.tracks = clip.tracks.filter((t) => !/Hips\.position$/i.test(t.name));
+          clip.tracks.forEach((t) => {
+            t.name = usesColon
+              ? t.name.replace(/^mixamorig(?!:)/, 'mixamorig:')
+              : t.name.replace(/^mixamorig:/, 'mixamorig');
+          });
+          const mixer = new THREE.AnimationMixer(fbx);
+          mixer.clipAction(clip).play();
+          this.mixers.push(mixer);
+        }
+      })
+      .catch((err) => console.warn(`NPC ${propName} erro:`, err));
+    return g;
   }
 
   /** y = altura da base do objeto. Com `parent`, as coordenadas são relativas a ele. */
@@ -161,6 +315,7 @@ export function buildRoom(def: RoomDef): { group: THREE.Group; colliders: Collid
   }
 
   def.furnish(b);
+  b.group.userData['mixers'] = b.mixers;
   return { group: b.group, colliders: b.colliders, props: b.props };
 }
 
@@ -168,70 +323,61 @@ export function buildRoom(def: RoomDef): { group: THREE.Group; colliders: Collid
 
 /** Quarto completo (usado de manhã e à noite) */
 function bedroom(b: Builder, night: boolean): void {
-      // cama
-      b.box(2.4, 0.5, 3.6, 0x92400e, -4.6, 0, -3, true);
-      b.box(2.2, 0.3, 3.4, 0xf8fafc, -4.6, 0.5, -3);
-      b.box(2.4, 1.4, 0.2, 0x78350f, -4.6, 0, -4.8);
-      const pillow = b.pivot('pillow', -4.6, 0.925, -4.15);
-      b.box(1.6, 0.25, 0.8, 0xffffff, 0, -0.125, 0, false, pillow);
+  // cama 3D Kenney + travesseiro 3D
+  b.glb('bedSingle', -4.6, 0, -3.0, { targetW: 2.4, targetH: 1.4, targetD: 3.6, collide: true });
+  const pillow = b.pivot('pillow', -4.6, 0.925, -4.15);
+  b.glb('pillow', 0, -0.125, 0, { targetW: 1.6, targetH: 0.25, targetD: 0.8, parent: pillow });
 
-      // coberta de pano: começa cobrindo a criança
-      const bl = b.pivot('blanket', -4.6, 0.8, -2.5);
-      const cloth = new ClothBlanket();
-      if (night) {
-        // cama já arrumada, esperando a criança deitar
-        cloth.params.raise = 0;
-        cloth.params.wrinkle = 0.03;
-        cloth.params.smoothL = cloth.params.smoothR = 1.2;
-        cloth.params.fold = Math.PI;
-      } else {
-        cloth.params.raise = 0.45; // cobrindo a criança dormindo
-        cloth.params.wrinkle = 0.035;
-        cloth.params.smoothL = cloth.params.smoothR = 1.2;
-      }
-      cloth.update();
-      bl.add(cloth.mesh);
-      bl.userData['cloth'] = cloth;
+  // coberta de pano: começa cobrindo a criança
+  const bl = b.pivot('blanket', -4.6, 0.8, -2.5);
+  const cloth = new ClothBlanket();
+  if (night) {
+    // cama já arrumada, esperando a criança deitar
+    cloth.params.raise = 0;
+    cloth.params.wrinkle = 0.03;
+    cloth.params.smoothL = cloth.params.smoothR = 1.2;
+    cloth.params.fold = Math.PI;
+  } else {
+    cloth.params.raise = 0.45; // cobrindo a criança dormindo
+    cloth.params.wrinkle = 0.035;
+    cloth.params.smoothL = cloth.params.smoothR = 1.2;
+  }
+  cloth.update();
+  bl.add(cloth.mesh);
+  bl.userData['cloth'] = cloth;
 
-      // ursinho no chão (a criança coloca no travesseiro no fim)
-      const teddy = b.pivot('teddy', night ? -4.6 : -6.4, night ? 1.05 : 0, night ? -4.15 : -4.0);
-      b.sph(0.22, 0xb45309, 0, 0.25, 0, teddy);
-      b.sph(0.16, 0xb45309, 0, 0.56, 0, teddy);
-      b.sph(0.06, 0xb45309, -0.12, 0.7, 0, teddy);
-      b.sph(0.06, 0xb45309, 0.12, 0.7, 0, teddy);
-      b.sph(0.07, 0xfcd34d, 0, 0.53, 0.14, teddy);
-      b.sph(0.025, 0x1f2937, -0.06, 0.6, 0.13, teddy);
-      b.sph(0.025, 0x1f2937, 0.06, 0.6, 0.13, teddy);
+  // ursinho 3D Kenney no chão (a criança coloca no travesseiro no fim)
+  const teddy = b.pivot('teddy', night ? -4.6 : -6.4, night ? 1.05 : 0, night ? -4.15 : -4.0);
+  b.glb('bear', 0, 0, 0, { targetW: 0.55, targetH: 0.72, targetD: 0.5, parent: teddy });
 
-      // "Zzz" sobre a cama
-      const zzz = emojiSprite('💤', 1.2);
-      zzz.position.set(-4.6, 2.6, -3.6);
-      zzz.visible = !night;
-      b.group.add(zzz);
-      b.props['zzz'] = zzz;
+  // "Zzz" sobre a cama
+  const zzz = emojiSprite('💤', 1.2);
+  zzz.position.set(-4.6, 2.6, -3.6);
+  zzz.visible = !night;
+  b.group.add(zzz);
+  b.props['zzz'] = zzz;
 
-      // guarda-roupa com portas que abrem
-      b.box(3, 4, 1.2, 0x7c3aed, 3.5, 0, -4.2, true);
-      b.box(2.8, 3.6, 0.04, 0x2e1065, 3.5, 0.2, -3.61);
-      [[2.7, 0xf87171], [3.3, 0x34d399], [3.9, 0xfacc15], [4.4, 0x60a5fa]].forEach(([x, c]) => b.box(0.4, 0.8, 0.08, c, x, 2.2, -3.55));
-      const wl = b.pivot('wardL', 2.1, 0.2, -3.55);
-      b.box(1.4, 3.6, 0.06, 0x8b5cf6, 0.7, 0, 0, false, wl);
-      b.box(0.08, 0.5, 0.06, 0xfacc15, 1.25, 1.5, 0.05, false, wl);
-      const wr = b.pivot('wardR', 4.9, 0.2, -3.55);
-      b.box(1.4, 3.6, 0.06, 0x8b5cf6, -0.7, 0, 0, false, wr);
-      b.box(0.08, 0.5, 0.06, 0xfacc15, -1.25, 1.5, 0.05, false, wr);
+  // guarda-roupa com portas que abrem
+  b.glb('bookcaseClosed', 3.5, 0, -4.2, { targetW: 3.0, targetH: 4.0, targetD: 1.2, collide: true });
+  b.box(2.8, 3.6, 0.04, 0x2e1065, 3.5, 0.2, -3.61);
+  [[2.7, 0xf87171], [3.3, 0x34d399], [3.9, 0xfacc15], [4.4, 0x60a5fa]].forEach(([x, c]) => b.box(0.4, 0.8, 0.08, c, x, 2.2, -3.55));
+  const wl = b.pivot('wardL', 2.1, 0.2, -3.55);
+  b.box(1.4, 3.6, 0.06, 0x8b5cf6, 0.7, 0, 0, false, wl);
+  b.box(0.08, 0.5, 0.06, 0xfacc15, 1.25, 1.5, 0.05, false, wl);
+  const wr = b.pivot('wardR', 4.9, 0.2, -3.55);
+  b.box(1.4, 3.6, 0.06, 0x8b5cf6, -0.7, 0, 0, false, wr);
+  b.box(0.08, 0.5, 0.06, 0xfacc15, -1.25, 1.5, 0.05, false, wr);
 
-      // janela, escrivaninha, tapete
-      b.box(2.4, 1.8, 0.05, 0xffffff, 0, 1.6, -4.98);
-      b.box(2.1, 1.5, 0.06, 0x7dd3fc, 0, 1.75, -4.96);
-      b.box(1.4, 0.9, 2, 0xd97706, 6.3, 0, 0.3, true);
-      b.box(0.5, 0.1, 0.7, 0xef4444, 6.3, 0.9, 0.3);
-      b.cyl(2.2, 0.04, 0xfda4af, -0.5, 0, 1.2);
+  // janela, escrivaninha 3D Kenney, notebook, tapete
+  b.box(2.4, 1.8, 0.05, 0xffffff, 0, 1.6, -4.98);
+  b.box(2.1, 1.5, 0.06, 0x7dd3fc, 0, 1.75, -4.96);
+  b.glb('desk', 6.3, 0, 0.3, { rotY: -Math.PI / 2, targetW: 2.0, targetH: 0.9, targetD: 1.4, collide: true });
+  b.glb('laptop', 6.3, 0.9, 0.3, { rotY: -Math.PI / 2, targetW: 0.65, targetH: 0.42, targetD: 0.55 });
+  b.glb('rugRound', -0.5, 0, 1.2, { targetW: 4.4, targetH: 0.04, targetD: 4.4 });
 
-      // mochila no chão
-      const pack = b.pivot('pack', 5, 0, 2.8);
-      b.box(0.7, 0.9, 0.4, 0xf97316, 0, 0, 0, false, pack);
-      b.box(0.5, 0.4, 0.1, 0xfdba74, 0, 0.15, 0.23, false, pack);
+  // mochila 3D no chão
+  const pack = b.pivot('pack', 5, 0, 2.8);
+  pack.add(makePack());
 }
 
 export const ROOMS: RoomDef[] = [
@@ -275,36 +421,29 @@ export const ROOMS: RoomDef[] = [
       { label: 'Tomar banho', icon: '🚿', say: 'Hora do banho! Fique debaixo do chuveiro.', x: -5, z: -4.1, look: [-5, 10], action: 'shower' },
     ],
     furnish: (b) => {
-      // chuveiro
-      b.box(3, 0.04, 3, 0x93c5fd, -5, 0, -3.4);
-      b.box(0.1, 3.4, 0.1, 0x94a3b8, -5, 0, -4.75);
-      b.box(0.1, 0.1, 0.7, 0x94a3b8, -5, 3.3, -4.4);
-      b.cyl(0.35, 0.1, 0x64748b, -5, 3.2, -4.1);
-      b.box(0.08, 3, 3, 0xa5f3fc, -3.45, 0.2, -3.4, true);
+      // chuveiro 3D Kenney
+      b.glb('shower', -5, 0, -3.4, { targetW: 2.8, targetH: 3.3, targetD: 2.8 });
+      b.col(-3.55, -3.35, -4.9, -1.9);
 
-      // bancada com duas pias e espelho
-      b.box(3.8, 1, 1, 0xe2e8f0, 0, 0, -4.3, true);
+      // bancada com duas pias 3D Kenney e espelho
+      b.glb('bathroomCabinetDrawer', 0, 0, -4.3, { targetW: 3.8, targetH: 1.0, targetD: 1.0, collide: true });
       for (const x of [-0.9, 0.9]) {
-        b.cyl(0.5, 0.1, 0x38bdf8, x, 1, -4.3);
-        b.box(0.1, 0.45, 0.1, 0x94a3b8, x, 1.0, -4.65);
-        b.box(0.08, 0.08, 0.35, 0x94a3b8, x, 1.4, -4.5);
+        b.glb('bathroomSink', x, 0, -4.25, { targetW: 1.1, targetH: 1.35, targetD: 0.95 });
       }
-      b.box(3.4, 1.5, 0.05, 0x64748b, 0, 1.75, -4.98);
-      b.box(3.2, 1.3, 0.06, 0xbae6fd, 0, 1.85, -4.96);
+      b.glb('bathroomMirror', 0, 1.65, -4.94, { targetW: 3.2, targetH: 1.4, targetD: 0.12 });
       b.cyl(0.1, 0.25, 0xf472b6, 1.6, 1.0, -4.3);
       b.box(0.25, 0.12, 0.18, 0xfde047, -1.6, 1.0, -4.3);
 
-      // vaso + biombo de privacidade
-      b.cyl(0.4, 0.7, 0xffffff, 4.6, 0, -3.8, true);
-      b.box(0.9, 0.9, 0.4, 0xffffff, 4.6, 0.7, -4.5, true);
+      // vaso 3D Kenney + biombo de privacidade
+      b.glb('toilet', 4.6, 0, -4.0, { targetW: 1.0, targetH: 1.4, targetD: 1.3, collide: true });
       const pv = b.pivot('privacy', 4.6, 0, -1.9);
       b.box(2.2, 2.4, 0.1, 0xf9a8d4, 0, 0, 0, false, pv);
       b.box(2.2, 0.1, 0.12, 0xec4899, 0, 2.3, 0, false, pv);
       pv.scale.y = 0.001;
       pv.visible = false;
 
-      b.box(0.9, 1.2, 1.6, 0x14b8a6, 6.5, 0, 0.5, true);
-      b.box(1.4, 0.04, 0.9, 0xfb7185, -1.5, 0, 0.5);
+      b.glb('washer', 6.45, 0, 0.5, { rotY: -Math.PI / 2, targetW: 1.5, targetH: 1.35, targetD: 1.0, collide: true });
+      b.glb('rugRectangle', -1.5, 0, 0.5, { targetW: 1.6, targetH: 0.04, targetD: 1.0 });
     },
   },
 
@@ -322,57 +461,39 @@ export const ROOMS: RoomDef[] = [
     wall: 0xfecaca,
     steps: [
       { label: 'Pegar uma fruta', icon: '🍎', say: '{nome}, pegue uma fruta na geladeira.', x: -5.5, z: -2.6, look: [-5.5, -4.1], action: 'fruit' },
-      { label: 'Comer à mesa', icon: '🍽️', say: 'Vá até a mesa e coma a sua fruta.', x: 1.5, z: 1.0, look: [1.5, -0.5], action: 'eat' },
+      { label: 'Comer à mesa', icon: '🍽️', say: 'Vá até a cadeira e coma a sua fruta à mesa.', x: -0.45, z: 0.45, look: [1.5, -0.5], action: 'eat' },
       { label: 'Lavar o prato', icon: '🧽', say: 'Leve o prato até a pia e lave.', x: 3.5, z: -2.6, look: [3.5, -4.1], action: 'dishes' },
       { label: 'Guardar no armário', icon: '🗄️', say: 'Agora, guarde o prato no armário.', x: 5.3, z: 1.5, look: [6.4, 1.5], action: 'cabinet' },
     ],
     furnish: (b) => {
-      // geladeira
-      b.box(1.6, 3.2, 1.4, 0xf1f5f9, -5.5, 0, -4.1, true);
-      b.box(1.4, 2.9, 0.04, 0xdbeafe, -5.5, 0.15, -3.41);
-      b.box(1.4, 0.05, 0.5, 0x93c5fd, -5.5, 1.2, -3.62);
-      b.box(1.4, 0.05, 0.5, 0x93c5fd, -5.5, 2.0, -3.62);
-      b.box(0.25, 0.5, 0.25, 0xffffff, -6.0, 1.25, -3.65);
-      b.sph(0.13, 0xfb923c, -5.75, 1.38, -3.65);
+      // geladeira 3D Kenney + porta animada (fridgeDoor) + maçã 3D (apple)
+      b.glb('kitchenFridgeLarge', -5.5, 0, -4.15, { targetW: 1.6, targetH: 3.2, targetD: 1.35, collide: true });
       const apple = b.pivot('apple', -5.2, 1.25, -3.6);
-      b.sph(0.14, 0xef4444, 0, 0.14, 0, apple);
-      b.box(0.03, 0.08, 0.03, 0x78350f, 0, 0.27, 0, false, apple);
-      b.box(0.1, 0.02, 0.06, 0x22c55e, 0.05, 0.3, 0, false, apple);
-      const fd = b.pivot('fridgeDoor', -4.7, 0.1, -3.36);
-      b.box(1.6, 3.0, 0.1, 0xe2e8f0, -0.8, 0, 0, false, fd);
-      b.box(0.08, 1.2, 0.1, 0x64748b, -0.15, 1.0, 0.1, false, fd);
+      b.glb('apple', 0, 0, 0, { folder: 'food', targetW: 0.32, targetH: 0.34, targetD: 0.32, parent: apple });
+      b.pivot('fridgeDoor', -4.7, 0.1, -3.36);
 
-      // mesa, cadeiras e prato
-      b.box(2.8, 0.15, 1.8, 0xb45309, 1.5, 0.85, -0.5);
-      for (const [lx, lz] of [[0.3, -1.2], [2.7, -1.2], [0.3, 0.2], [2.7, 0.2]]) b.box(0.15, 0.85, 0.15, 0x92400e, lx, 0, lz);
-      b.col(0.1, 2.9, -1.4, 0.4);
-      for (const cx of [-0.5, 3.5]) {
-        b.box(0.6, 0.45, 0.6, 0xef4444, cx, 0, -0.5, true);
-        b.box(0.1, 0.6, 0.6, 0xdc2626, cx + (cx < 1 ? -0.25 : 0.25), 0.45, -0.5);
-      }
+      // mesa 3D Kenney, cadeiras e prato 3D
+      b.glb('table', 1.5, 0, -0.5, { targetW: 2.8, targetH: 1.0, targetD: 1.8, collide: true });
+      b.glb('chairCushion', -0.45, 0, -0.5, { rotY: Math.PI / 2, targetW: 0.75, targetH: 1.15, targetD: 0.75, collide: true });
+      b.glb('chairCushion', 3.45, 0, -0.5, { rotY: -Math.PI / 2, targetW: 0.75, targetH: 1.15, targetD: 0.75, collide: true });
       const plate = b.pivot('plate', 1.5, 1.0, -0.5);
-      b.cyl(0.3, 0.04, 0xffffff, 0, 0, 0, false, plate);
-      const crumbs = b.box(0.18, 0.04, 0.12, 0xfbbf24, 0.05, 0.04, 0, false, plate);
+      b.glb('plate', 0, 0, 0, { folder: 'food', targetW: 0.65, targetH: 0.08, targetD: 0.65, parent: plate });
+      const crumbs = b.box(0.18, 0.04, 0.12, 0xfbbf24, 0.05, 0.05, 0, false, plate);
       crumbs.visible = false;
       plate.userData['crumbs'] = crumbs;
 
-      // balcão com pia e fogão
-      b.box(4.4, 1.0, 1.4, 0xfef3c7, 3.5, 0, -4.1, true);
-      b.box(4.4, 0.1, 1.4, 0x94a3b8, 3.5, 1.0, -4.1);
-      b.cyl(0.5, 0.1, 0x7dd3fc, 3.5, 1.05, -4.1);
-      b.box(0.1, 0.35, 0.1, 0x64748b, 3.5, 1.1, -4.55);
-      b.box(0.08, 0.08, 0.35, 0x64748b, 3.5, 1.4, -4.4);
-      b.cyl(0.3, 0.05, 0x1f2937, 5.0, 1.1, -4.1);
-      b.box(3, 1, 0.8, 0xc2410c, 3.5, 2.6, -4.5);
+      // balcão 3D Kenney com pia, fogão, coifa e armários aéreos
+      b.glb('kitchenCabinet', 2.0, 0, -4.1, { targetW: 1.4, targetH: 1.05, targetD: 1.4, collide: true });
+      b.glb('kitchenSink', 3.5, 0, -4.1, { targetW: 1.6, targetH: 1.4, targetD: 1.4, collide: true });
+      b.glb('kitchenStove', 5.0, 0, -4.1, { targetW: 1.4, targetH: 1.35, targetD: 1.4, collide: true });
+      b.glb('hoodModern', 5.0, 2.4, -4.3, { targetW: 1.4, targetH: 1.0, targetD: 0.9 });
+      b.glb('kitchenCabinetUpperDouble', 2.8, 2.5, -4.5, { targetW: 2.4, targetH: 1.0, targetD: 0.75 });
 
-      // armário alto
-      b.box(1.2, 3.6, 2, 0xc2410c, 6.4, 0, 1.5, true);
-      b.box(0.04, 3.2, 1.8, 0x431407, 5.79, 0.2, 1.5);
-      const cl = b.pivot('cabL', 5.78, 0.2, 0.55);
-      b.box(0.05, 3.2, 0.9, 0x9a3412, 0, 0, 0.45, false, cl);
-      const cr = b.pivot('cabR', 5.78, 0.2, 2.45);
-      b.box(0.05, 3.2, 0.9, 0x9a3412, 0, 0, -0.45, false, cr);
-      b.box(2.4, 0.04, 1.4, 0x86efac, 1.5, 0, 2.6);
+      // armário alto 3D limpo
+      b.glb('bookcaseOpen', 6.4, 0, 1.5, { rotY: -Math.PI / 2, targetW: 2.0, targetH: 3.2, targetD: 1.1, collide: true });
+      b.pivot('cabL', 5.78, 0.2, 0.55);
+      b.pivot('cabR', 5.78, 0.2, 2.45);
+      b.glb('rugRectangle', 1.5, 0, 2.6, { targetW: 2.4, targetH: 0.04, targetD: 1.4 });
     },
   },
 
@@ -403,70 +524,56 @@ export const ROOMS: RoomDef[] = [
       b.box(24, 0.06, 2.4, 0xe2e8f0, 0, 0, -2.2);
       b.box(24, 0.04, 4.4, 0x475569, 0, 0, 1.2);
       for (let x = -11; x <= 11; x += 2.2) b.box(1.2, 0.02, 0.15, 0xfef08a, x, 0.04, 1.2);
+      // faixa de pedestres e semáforo interativo
+      for (let z = -0.5; z <= 2.9; z += 0.68) b.box(1.5, 0.025, 0.34, 0xffffff, 0.5, 0.04, z);
+      b.cyl(0.06, 2.5, 0x334155, -0.8, 0, -1.2, true);
+      b.box(0.32, 0.72, 0.24, 0x1e293b, -0.8, 2.0, -1.2);
+      b.props['lightRed'] = b.sph(0.09, 0xef4444, -0.8, 2.52, -1.07);
+      b.props['lightGreen'] = b.sph(0.09, 0x14532d, -0.8, 2.22, -1.07);
       b.box(24, 0.1, 0.15, 0xcbd5e1, 0, 0, -1.0);
       b.col(-12, 12, -0.9, 6);
 
-      // casa com porta
-      b.box(7, 3.6, 1.2, 0xfde68a, -7, 0, -5.2, true);
-      b.box(7.6, 0.5, 1.8, 0xdc2626, -7, 3.6, -5.1);
-      b.box(1.1, 2.2, 0.04, 0x1e1b4b, -7, 0, -4.59);
-      const door = b.pivot('houseDoor', -7.55, 0, -4.55);
-      b.box(1.1, 2.2, 0.08, 0x7c2d12, 0.55, 0, 0, false, door);
-      b.box(0.1, 0.1, 0.1, 0xfacc15, 0.95, 1.1, 0.08, false, door);
+      // frente da casa em 3D (Kenney Suburban) + porta interativa animada
+      b.glb('building-type-b', -7.0, 0, -6.3, { folder: 'props', targetW: 7.4, targetH: 5.2, targetD: 3.4, collide: true });
+      b.glb('building-type-a', 1.2, 0, -6.5, { folder: 'props', targetW: 6.2, targetH: 4.8, targetD: 3.2, collide: true });
+      b.box(1.26, 2.3, 0.14, 0x78350f, -7.0, 0, -4.56);
+      b.box(1.08, 2.18, 0.06, 0x1e1b4b, -7.0, 0, -4.53);
+      const door = b.pivot('houseDoor', -7.54, 0, -4.48);
+      b.box(1.08, 2.18, 0.08, 0x9a3412, 0.54, 0, 0, false, door);
+      b.box(0.1, 0.1, 0.1, 0xfacc15, 0.94, 1.1, 0.08, false, door);
       door.rotation.y = -1.5; // começa aberta
-      b.box(1.1, 1.0, 0.05, 0x7dd3fc, -9.3, 1.4, -4.58);
-      b.box(1.1, 1.0, 0.05, 0x7dd3fc, -4.7, 1.4, -4.58);
 
-      // árvores
-      for (const [tx, tz] of [[-11, -2], [1.5, -5], [9.5, -4.5], [-2, -5]]) {
-        b.cyl(0.25, 1.6, 0x78350f, tx, 0, tz, true);
-        b.sph(1.0, 0x22c55e, tx, 2.2, tz);
-        b.sph(0.7, 0x16a34a, tx + 0.5, 2.7, tz);
+      // cercas e árvores 3D Kenney
+      for (const fx of [-10.8, -3.2, -1.6, 0.0]) {
+        b.glb('fence', fx, 0, -4.4, { folder: 'props', targetW: 1.5, targetH: 0.95, targetD: 0.25, collide: true });
       }
+      b.glb('tree-large', -11.0, 0, -2.3, { folder: 'props', targetW: 2.2, targetH: 3.8, targetD: 2.2, collide: true });
+      b.glb('tree', 9.5, 0, -4.5, { folder: 'props', targetW: 2.0, targetH: 3.5, targetD: 2.0, collide: true });
+      b.glb('tree-small', -2.8, 0, -4.9, { folder: 'props', targetW: 1.4, targetH: 2.6, targetD: 1.4 });
 
-      // ponto de ônibus
+      // ponto de ônibus + banco 3D Kenney
       b.cyl(0.07, 3, 0x64748b, 6.4, 0, -2.9, true);
       b.box(0.9, 0.9, 0.06, 0xfacc15, 6.4, 2.2, -2.9);
       const bs = emojiSprite('🚌', 0.7);
       bs.position.set(6.4, 2.65, -2.84);
       b.group.add(bs);
-      b.box(1.8, 0.1, 0.5, 0x92400e, 3.6, 0.5, -2.9, true);
-      b.box(0.1, 0.5, 0.4, 0x64748b, 2.9, 0, -2.9);
-      b.box(0.1, 0.5, 0.4, 0x64748b, 4.3, 0, -2.9);
+      b.glb('bench', 3.6, 0, -2.9, { targetW: 1.8, targetH: 0.85, targetD: 0.65, collide: true });
 
-      // ônibus (chega de longe pela direita)
+      // ônibus escolar 3D Kenney (chega de longe pela direita)
       const bus = b.pivot('bus', 32, 0, 1.4);
-      b.box(7, 2.0, 2.6, 0xfacc15, 0, 0.5, 0, false, bus);
-      b.box(7.02, 0.25, 2.62, 0x1f2937, 0, 1.0, 0, false, bus);
-      for (const wx of [-2.4, -1.2, 0, 1.2, 2.4]) {
-        b.box(0.9, 0.7, 0.05, 0x7dd3fc, wx, 1.6, 1.32, false, bus);
-        b.box(0.9, 0.7, 0.05, 0x7dd3fc, wx, 1.6, -1.32, false, bus);
-      }
-      b.box(0.05, 0.8, 2.2, 0x7dd3fc, -3.52, 1.6, 0, false, bus);
-      const wheels: THREE.Mesh[] = [];
-      for (const wx of [-2.2, 2.2]) {
-        for (const wz of [-1.3, 1.3]) {
-          const w = b.cyl(0.45, 0.3, 0x111827, wx, 0.3, wz, false, bus);
-          w.rotation.x = Math.PI / 2;
-          wheels.push(w);
-        }
-      }
-      bus.userData['wheels'] = wheels;
+      b.glb('delivery', 0, 0, 0, { folder: 'vehicles', rotY: -Math.PI / 2, targetW: 2.5, targetH: 2.7, targetD: 6.8, parent: bus });
       const roof = emojiSprite('🏫', 1.1);
-      roof.position.set(0, 3.1, 0);
+      roof.position.set(0, 3.2, 0);
       bus.add(roof);
-      b.box(0.9, 1.7, 0.04, 0x0f172a, -2.2, 0.55, -1.31, false, bus);
       const dp = new THREE.Group();
-      dp.position.set(-2.65, 0.55, -1.34);
-      b.box(0.9, 1.7, 0.06, 0x0ea5e9, 0.45, 0, 0, false, dp);
+      dp.position.set(-2.1, 0.35, -1.18);
+      b.box(0.75, 1.55, 0.05, 0x38bdf8, 0.375, 0, 0, false, dp);
       bus.add(dp);
       b.props['busDoor'] = dp;
 
-      // carro que passa na hora de olhar a rua
+      // carro 3D Kenney que passa na hora de olhar a rua
       const car = b.pivot('car', 40, 0, 2.6);
-      b.box(3, 0.7, 1.5, 0xef4444, 0, 0.35, 0, false, car);
-      b.box(1.6, 0.6, 1.4, 0xfca5a5, 0, 1.0, 0, false, car);
-      for (const wx of [-0.9, 0.9]) for (const wz of [-0.7, 0.7]) b.cyl(0.28, 0.2, 0x111827, wx, 0.1, wz, false, car).rotation.x = Math.PI / 2;
+      b.glb('sedan', 0, 0, 0, { folder: 'vehicles', rotY: -Math.PI / 2, targetW: 1.7, targetH: 1.4, targetD: 3.6, parent: car });
     },
   },
 
@@ -498,29 +605,18 @@ export const ROOMS: RoomDef[] = [
       sum.position.set(1.3, 2.4, -4.85);
       b.group.add(abc, sum);
 
-      // professora (estilo bonequinho) + mesa
-      b.box(1.8, 0.9, 0.9, 0xb45309, 4.2, 0, -4.2, true);
-      const t = b.pivot('teacher', 2.6, 0, -3.4);
-      t.rotation.y = Math.PI;
-      b.box(0.6, 0.9, 0.35, 0xa855f7, 0, 0.75, 0, false, t);
-      b.box(0.26, 0.75, 0.3, 0x1e3a8a, -0.16, 0, 0, false, t);
-      b.box(0.26, 0.75, 0.3, 0x1e3a8a, 0.16, 0, 0, false, t);
-      b.box(0.18, 0.8, 0.22, 0xfcd9b6, -0.4, 0.8, 0, false, t);
-      b.box(0.18, 0.8, 0.22, 0xfcd9b6, 0.4, 0.8, 0, false, t);
-      b.box(0.5, 0.5, 0.5, 0xfcd9b6, 0, 1.65, 0, false, t);
-      b.box(0.54, 0.2, 0.54, 0x78350f, 0, 2.05, -0.02, false, t);
-      b.box(0.07, 0.07, 0.04, 0x1f2937, -0.12, 1.85, 0.26, false, t);
-      b.box(0.07, 0.07, 0.04, 0x1f2937, 0.12, 1.85, 0.26, false, t);
+      // professora 3D articulada + mesa 3D Kenney
+      b.glb('desk', 4.2, 0, -4.2, { targetW: 1.8, targetH: 0.9, targetD: 0.9, collide: true });
+      b.npc('teacher', 'menina', 2.6, -3.4, 0, { top: 0x9333ea, pants: 0x1e3a8a, hair: 0x5c2d16 });
 
-      // armário com nichos (a mochila vai para o do meio)
-      b.box(1.0, 2.6, 4.0, 0xf59e0b, -6.4, 0, -1.5, true);
-      for (const z of [-2.8, -1.5, -0.2]) b.box(0.04, 2.0, 1.1, 0x451a03, -5.89, 0.3, z);
+      // estantes 3D abertas para guardar mochilas
+      b.glb('bookcaseOpen', -6.3, 0, -2.5, { rotY: Math.PI / 2, targetW: 1.8, targetH: 2.5, targetD: 0.9, collide: true });
+      b.glb('bookcaseOpen', -6.3, 0, -0.5, { rotY: Math.PI / 2, targetW: 1.8, targetH: 2.5, targetD: 0.9, collide: true });
 
-      // carteiras: caderno (desenho) e lancheira
+      // carteiras 3D Kenney: caderno (desenho) e lancheira
       for (const dx of [-1.0, 3.0]) {
-        b.box(1.6, 0.08, 0.9, 0xfbbf24, dx, 0.75, 0.8);
-        for (const [lx, lz] of [[-0.7, -0.35], [0.7, -0.35], [-0.7, 0.35], [0.7, 0.35]]) b.box(0.08, 0.75, 0.08, 0x92400e, dx + lx, 0, 0.8 + lz);
-        b.col(dx - 0.8, dx + 0.8, 0.35, 1.25);
+        b.glb('desk', dx, 0, 0.8, { targetW: 1.6, targetH: 0.83, targetD: 0.9, collide: true });
+        b.glb('chairDesk', dx, 0, 1.65, { rotY: Math.PI, targetW: 0.65, targetH: 0.9, targetD: 0.65, collide: true });
       }
       const nb = b.pivot('notebook', -1.0, 0.83, 0.8);
       b.box(0.7, 0.02, 0.5, 0xffffff, 0, 0, 0, false, nb);
@@ -533,13 +629,11 @@ export const ROOMS: RoomDef[] = [
       b.box(0.5, 0.18, 0.32, 0x3b82f6, 3.0, 0.83, 0.8);
       const lid = b.pivot('lunchLid', 3.0, 1.01, 0.64);
       b.box(0.5, 0.04, 0.32, 0x2563eb, 0, 0, 0.16, false, lid);
-      const sw = b.pivot('sandwich', 3.0, 0.9, 0.8);
-      b.box(0.3, 0.04, 0.28, 0xfcd34d, 0, 0, 0, false, sw);
-      b.box(0.3, 0.04, 0.28, 0x22c55e, 0, 0.04, 0, false, sw);
-      b.box(0.3, 0.05, 0.28, 0xfcd34d, 0, 0.08, 0, false, sw);
+      const sw = b.pivot('sandwich', 3.0, 0.88, 0.8);
+      b.glb('sandwich', 0, 0, 0, { folder: 'food', targetW: 0.36, targetH: 0.16, targetD: 0.34, parent: sw });
 
       // rodinha, janela, cartazes
-      b.cyl(1.6, 0.03, 0x86efac, 1.0, 0, 2.4);
+      b.glb('rugRound', 1.0, 0, 2.4, { targetW: 3.2, targetH: 0.04, targetD: 3.2 });
       b.box(2, 1.5, 0.05, 0x7dd3fc, -4.5, 2.0, -4.98);
       b.box(1.2, 0.9, 0.05, 0xf9a8d4, 5.5, 2.4, -4.98);
     },
@@ -596,13 +690,13 @@ export const ROOMS: RoomDef[] = [
       b.col(4.4, 5.6, -5.0, -3.7);
       b.col(4.5, 5.5, -3.7, -0.7);
 
-      // cerca, árvores e sol
+      // banco 3D Kenney, cerca, árvores 3D e sol
+      b.glb('bench', -1.5, 0, -4.2, { targetW: 2.0, targetH: 0.85, targetD: 0.7, collide: true });
       for (let x = -10; x <= 10; x += 1.2) b.box(0.12, 0.9, 0.1, 0xffffff, x, 0, -5.6);
       b.box(22, 0.1, 0.08, 0xffffff, 0, 0.6, -5.6);
-      for (const [tx, tz] of [[-9.5, -4.2], [9, 2.5], [-9.5, 3.5]]) {
-        b.cyl(0.25, 1.6, 0x78350f, tx, 0, tz, true);
-        b.sph(1.0, 0x22c55e, tx, 2.2, tz);
-      }
+      b.glb('tree-large', -9.5, 0, -4.2, { folder: 'props', targetW: 2.2, targetH: 3.8, targetD: 2.2, collide: true });
+      b.glb('tree', 9.0, 0, 2.5, { folder: 'props', targetW: 2.0, targetH: 3.5, targetD: 2.0, collide: true });
+      b.glb('tree', -9.5, 0, 3.5, { folder: 'props', targetW: 2.0, targetH: 3.5, targetD: 2.0, collide: true });
       const sun = emojiSprite('☀️', 2.4);
       sun.position.set(8, 6, -6);
       b.group.add(sun);
@@ -628,46 +722,33 @@ export const ROOMS: RoomDef[] = [
       { label: 'Ler um livro', icon: '📖', say: 'Para terminar, pegue um livro e leia.', x: -5.5, z: -2.7, look: [-5.5, -3.7], action: 'book' },
     ],
     furnish: (b) => {
-      // sofá
-      b.box(4, 0.9, 1.4, 0x6366f1, 0, 0, -4.1, true);
-      b.box(4, 1.3, 0.4, 0x4f46e5, 0, 0.9, -4.6);
-      b.box(0.4, 1.3, 1.4, 0x4f46e5, -2.2, 0, -4.1, true);
-      b.box(0.4, 1.3, 1.4, 0x4f46e5, 2.2, 0, -4.1, true);
-      b.box(1.1, 0.25, 1.0, 0xa5b4fc, -1, 0.9, -4.0);
-      b.box(1.1, 0.25, 1.0, 0xa5b4fc, 1, 0.9, -4.0);
+      // sofá 3D Kenney + luminária de chão + quadro
+      b.glb('loungeSofaLong', 0, 0, -4.1, { targetW: 4.2, targetH: 1.35, targetD: 1.4, collide: true });
+      b.glb('lampRoundFloor', -2.7, 0, -4.3, { targetW: 0.55, targetH: 2.1, targetD: 0.55, collide: true });
       b.box(1.4, 1, 0.05, 0xfcd34d, 0, 2.6, -4.97);
       b.box(1.2, 0.8, 0.06, 0xfb7185, 0, 2.7, -4.96);
 
-      // estante com livros
-      b.box(2, 3, 1, 0x92400e, -5.5, 0, -4.3, true);
-      const colors = [0xef4444, 0x3b82f6, 0x22c55e, 0xfacc15, 0xa855f7, 0xf97316];
-      for (const y of [0.3, 1.3, 2.3]) {
-        b.box(1.9, 0.05, 0.4, 0xb45309, -5.5, y, -3.65);
-        colors.forEach((c, i) => {
-          if (y === 1.3 && i === 2) return;
-          b.box(0.22, 0.55, 0.4, c, -6.2 + i * 0.3, y + 0.05, -3.65);
-        });
-      }
+      // estante 3D Kenney com livros + livro interativo
+      b.glb('bookcaseOpen', -5.5, 0, -4.3, { targetW: 2.0, targetH: 3.0, targetD: 1.0, collide: true });
+      b.glb('books', -5.9, 2.15, -4.2, { targetW: 0.8, targetH: 0.45, targetD: 0.45 });
       const book = b.pivot('book', -5.6, 1.35, -3.65);
       b.box(0.24, 0.5, 0.1, 0xdc2626, 0, 0, 0, false, book);
       b.box(0.2, 0.46, 0.07, 0xfef9c3, 0.02, 0.02, 0, false, book);
 
-      // planta
-      b.cyl(0.4, 0.5, 0xc2410c, 5, 0, -4.0, true);
-      const plant = b.pivot('plant', 5, 0.5, -4.0);
-      b.sph(0.35, 0x22c55e, 0, 0.35, 0, plant);
-      b.sph(0.25, 0x16a34a, 0.25, 0.2, 0.1, plant);
-      b.sph(0.25, 0x16a34a, -0.25, 0.25, -0.1, plant);
+      // planta 3D Kenney
+      b.col(4.5, 5.5, -4.5, -3.5);
+      const plant = b.pivot('plant', 5, 0, -4.0);
+      b.glb('pottedPlant', 0, 0, 0, { targetW: 0.95, targetH: 1.3, targetD: 0.95, parent: plant });
       const fl = new THREE.Group();
       plant.add(fl);
       fl.visible = false;
-      b.sph(0.1, 0xf472b6, 0.2, 0.75, 0.1, fl);
-      b.sph(0.1, 0xfacc15, -0.15, 0.8, 0, fl);
-      b.sph(0.1, 0xf472b6, 0, 0.9, -0.12, fl);
+      b.sph(0.1, 0xf472b6, 0.2, 1.2, 0.1, fl);
+      b.sph(0.1, 0xfacc15, -0.15, 1.25, 0, fl);
+      b.sph(0.1, 0xf472b6, 0, 1.35, -0.12, fl);
       b.props['flowers'] = fl;
 
-      // sapateira + sapatos
-      b.box(1, 1.2, 2, 0xb45309, 6.4, 0, -2.5, true);
+      // sapateira 3D Kenney + sapatos
+      b.glb('sideTableDrawers', 6.4, 0, -2.5, { rotY: -Math.PI / 2, targetW: 2.0, targetH: 1.2, targetD: 1.0, collide: true });
       const s1 = b.pivot('shoes1', 3.0, 0, 3.2);
       b.box(0.22, 0.15, 0.5, 0xef4444, -0.18, 0, 0, false, s1);
       b.box(0.22, 0.15, 0.5, 0xef4444, 0.18, 0, 0, false, s1);
@@ -676,10 +757,9 @@ export const ROOMS: RoomDef[] = [
       b.box(0.22, 0.15, 0.5, 0x3b82f6, -0.18, 0, 0, false, s2);
       b.box(0.22, 0.15, 0.5, 0x3b82f6, 0.18, 0, 0, false, s2);
 
-      // caixa de brinquedos + brinquedos
+      // caixa de brinquedos 3D Kenney + brinquedos
       const tb = b.pivot('toybox', -6.1, 0, 2.0);
-      b.box(1.4, 0.8, 1.2, 0xf59e0b, 0, 0, 0, false, tb);
-      b.box(1.2, 0.04, 1.0, 0x78350f, 0, 0.78, 0, false, tb);
+      b.glb('cardboardBoxOpen', 0, 0, 0, { targetW: 1.4, targetH: 0.8, targetD: 1.2, parent: tb });
       b.col(-6.8, -5.4, 1.4, 2.6);
       const t1 = b.pivot('toy1', -2.5, 0, 1.0);
       b.box(0.4, 0.4, 0.4, 0xef4444, 0, 0, 0, false, t1);
@@ -689,7 +769,7 @@ export const ROOMS: RoomDef[] = [
       b.cyl(0.2, 0.5, 0xfacc15, 0, 0, 0, false, t3);
       b.sph(0.15, 0xec4899, 0, 0.55, 0, t3);
 
-      b.cyl(2.5, 0.04, 0xfda4af, 0, 0, 0.5);
+      b.glb('rugRound', 0, 0, 0.5, { targetW: 5.0, targetH: 0.04, targetD: 5.0 });
     },
   },
 
@@ -713,10 +793,9 @@ export const ROOMS: RoomDef[] = [
     ],
     furnish: (b) => {
       bedroom(b, true);
-      // estante com o livro da história
-      b.box(2, 3, 1, 0x92400e, -1.2, 0, -4.3, true);
-      for (const y of [0.3, 1.3, 2.3]) b.box(1.9, 0.05, 0.4, 0xb45309, -1.2, y, -3.65);
-      [0xef4444, 0x3b82f6, 0x22c55e, 0xfacc15].forEach((c, i) => b.box(0.22, 0.55, 0.4, c, -1.9 + i * 0.3, 0.35, -3.65));
+      // estante 3D Kenney com o livro da história
+      b.glb('bookcaseOpen', -1.2, 0, -4.3, { targetW: 2.0, targetH: 3.0, targetD: 1.0, collide: true });
+      b.glb('books', -1.5, 2.15, -4.2, { targetW: 0.8, targetH: 0.45, targetD: 0.45 });
       const book = b.pivot('book', -1.2, 1.35, -3.65);
       b.box(0.24, 0.5, 0.1, 0xdc2626, 0, 0, 0, false, book);
       b.box(0.2, 0.46, 0.07, 0xfef9c3, 0.02, 0.02, 0, false, book);
@@ -754,23 +833,36 @@ export const ROOMS: RoomDef[] = [
       { label: 'Pagar no caixa', icon: '🧾', say: 'Vá até o caixa e pague as compras.', x: 5.0, z: 0.9, look: [5, -0.5], action: 'pay' },
     ],
     furnish: (b) => {
-      // 3 prateleiras com produtos
-      for (const x of [-4.5, 0, 4.5]) {
+      // 3 prateleiras com produtos 3D Kenney
+      const shelfDecor = [
+        ['croissant', 'cookie', 'cupcake', 'loaf-round', 'muffin'],
+        ['bottle-ketchup', 'bottle-musterd', 'can', 'carton-small', 'bottle-oil'],
+        ['apple', 'banana', 'pear', 'strawberry', 'pineapple'],
+      ];
+      [ -4.5, 0, 4.5 ].forEach((x, idx) => {
         b.box(3, 2.4, 0.9, 0x94a3b8, x, 0, -4.3, true);
         for (const y of [0.6, 1.3, 2.0]) {
           b.box(2.9, 0.05, 0.5, 0xe2e8f0, x, y, -3.85);
-          for (let i = 0; i < 5; i++) b.box(0.3, 0.3, 0.3, [0xef4444, 0x3b82f6, 0x22c55e, 0xfacc15, 0xa855f7][(i + y * 3) % 5 | 0], x - 1.2 + i * 0.6, y + 0.05, -3.85);
+          if (y !== 1.3) {
+            for (let i = 0; i < 5; i++) {
+              const item = shelfDecor[idx][(i + Math.round(y)) % 5];
+              b.glb(item, x - 1.2 + i * 0.6, y + 0.05, -3.85, { folder: 'food', targetW: 0.34, targetH: 0.34, targetD: 0.34 });
+            }
+          }
         }
+      });
+
+      const bread = b.pivot('bread', -4.5, 1.35, -3.75);
+      b.glb('loaf', 0, 0, 0, { folder: 'food', targetW: 0.62, targetH: 0.32, targetD: 0.34, parent: bread });
+
+      const milk = b.pivot('milk', 0, 1.35, -3.75);
+      b.glb('carton', 0, 0, 0, { folder: 'food', targetW: 0.3, targetH: 0.58, targetD: 0.3, parent: milk });
+
+      const fruit = b.pivot('fruit', 4.5, 1.35, -3.75);
+      b.box(0.6, 0.12, 0.4, 0x92400e, 0, 0, 0, false, fruit);
+      for (const [fx, fz] of [[-0.16, 0], [0.16, 0.05], [0, -0.08]]) {
+        b.glb('orange', fx, 0.12, fz, { folder: 'food', targetW: 0.24, targetH: 0.24, targetD: 0.24, parent: fruit });
       }
-      const bread = b.pivot('bread', -4.5, 1.3, -3.75);
-      b.box(0.6, 0.25, 0.3, 0xb45309, 0, 0, 0, false, bread);
-      b.box(0.5, 0.1, 0.25, 0xd97706, 0, 0.25, 0, false, bread);
-      const milk = b.pivot('milk', 0, 1.3, -3.75);
-      b.box(0.28, 0.5, 0.28, 0xffffff, 0, 0, 0, false, milk);
-      b.box(0.28, 0.12, 0.28, 0x3b82f6, 0, 0.5, 0, false, milk);
-      const fruit = b.pivot('fruit', 4.5, 1.3, -3.75);
-      b.box(0.6, 0.15, 0.4, 0x92400e, 0, 0, 0, false, fruit);
-      for (const [fx, fz] of [[-0.15, 0], [0.15, 0.05], [0, -0.08]]) b.sph(0.13, 0xfb923c, fx, 0.27, fz, fruit);
 
       // carrinho
       const cart = b.pivot('cart', -1.5, 0, 1.0);
@@ -782,21 +874,14 @@ export const ROOMS: RoomDef[] = [
       b.box(0.04, 0.5, 0.6, 0x475569, 0.45, 0.8, 0, false, cart);
       for (const [wx, wz] of [[-0.35, -0.22], [0.35, -0.22], [-0.35, 0.22], [0.35, 0.22]]) b.sph(0.07, 0x111827, wx, 0.07, wz, cart);
 
-      // caixa, caixa (pessoa) e sacola
-      b.box(2.2, 1.0, 1.0, 0x64748b, 5.0, 0, -0.5, true);
+      // caixa 3D Kenney, caixa (pessoa) e sacola 3D
+      b.glb('kitchenBar', 5.0, 0, -0.5, { targetW: 2.2, targetH: 1.0, targetD: 1.0, collide: true });
       b.box(0.5, 0.3, 0.4, 0x1f2937, 5.6, 1.0, -0.5);
-      const ck = b.pivot('cashier', 5.0, 0, -1.7);
-      b.box(0.6, 0.9, 0.35, 0x22c55e, 0, 0.75, 0, false, ck);
-      b.box(0.26, 0.75, 0.3, 0x1e3a8a, -0.16, 0, 0, false, ck);
-      b.box(0.26, 0.75, 0.3, 0x1e3a8a, 0.16, 0, 0, false, ck);
-      b.box(0.5, 0.5, 0.5, 0xfcd9b6, 0, 1.65, 0, false, ck);
-      b.box(0.54, 0.2, 0.54, 0x1f2937, 0, 2.05, -0.02, false, ck);
-      b.box(0.07, 0.07, 0.04, 0x1f2937, -0.12, 1.85, 0.26, false, ck);
-      b.box(0.07, 0.07, 0.04, 0x1f2937, 0.12, 1.85, 0.26, false, ck);
+      b.npc('cashier', 'menina', 5.0, -1.7, 0, { top: 0x16a34a, pants: 0x1e293b });
       const bag = b.pivot('bag', 4.2, 1.0, -0.5);
-      b.box(0.4, 0.5, 0.25, 0xd97706, 0, 0, 0, false, bag);
+      b.glb('bag', 0, 0, 0, { folder: 'food', targetW: 0.48, targetH: 0.58, targetD: 0.32, parent: bag });
       bag.visible = false;
-      b.cyl(1.8, 0.03, 0xfda4af, -1, 0, 1.8);
+      b.glb('rugRound', -1, 0, 1.8, { targetW: 3.6, targetH: 0.04, targetD: 3.6 });
     },
   },
 
@@ -829,33 +914,20 @@ export const ROOMS: RoomDef[] = [
       b.box(0.08, 1.2, 0.08, 0x94a3b8, 0, 2.2, -3.2);
       b.box(0.08, 0.08, 1.0, 0x94a3b8, 0, 3.35, -2.7);
       b.cyl(0.4, 0.12, 0xfef08a, 0, 3.15, -2.3);
-      // dentista (jaleco branco)
-      const d = b.pivot('dentist', -1.3, 0, -2.6);
-      d.rotation.y = Math.PI / 2;
-      b.box(0.6, 0.95, 0.35, 0xffffff, 0, 0.75, 0, false, d);
-      b.box(0.26, 0.75, 0.3, 0x0ea5e9, -0.16, 0, 0, false, d);
-      b.box(0.26, 0.75, 0.3, 0x0ea5e9, 0.16, 0, 0, false, d);
-      b.box(0.18, 0.8, 0.22, 0xffffff, -0.4, 0.8, 0, false, d);
-      b.box(0.18, 0.8, 0.22, 0xffffff, 0.4, 0.8, 0, false, d);
-      b.box(0.5, 0.5, 0.5, 0xfcd9b6, 0, 1.65, 0, false, d);
-      b.box(0.54, 0.2, 0.54, 0x1f2937, 0, 2.05, -0.02, false, d);
-      b.box(0.5, 0.2, 0.05, 0x7dd3fc, 0, 1.6, 0.27, false, d);
-      b.box(0.07, 0.07, 0.04, 0x1f2937, -0.12, 1.85, 0.26, false, d);
-      b.box(0.07, 0.07, 0.04, 0x1f2937, 0.12, 1.85, 0.26, false, d);
-      // bandeja com ferramentas
-      b.box(0.9, 1.0, 0.7, 0xe2e8f0, -2.4, 0, -4.2, true);
+      // dentista 3D articulado (jaleco branco)
+      b.npc('dentist', 'menino', -1.3, -2.6, Math.PI / 2, { top: 0xf8fafc, pants: 0x0284c7 });
+      // bandeja 3D Kenney com ferramentas
+      b.glb('sideTable', -2.4, 0, -4.2, { targetW: 0.9, targetH: 1.0, targetD: 0.7, collide: true });
       b.box(0.3, 0.04, 0.04, 0x94a3b8, -2.5, 1.0, -4.2);
       b.box(0.04, 0.04, 0.3, 0x94a3b8, -2.2, 1.0, -4.2);
-      // pia para enxaguar
-      b.box(1.6, 1.0, 0.9, 0xe2e8f0, 4.2, 0, -4.4, true);
-      b.cyl(0.4, 0.1, 0x38bdf8, 4.2, 1.0, -4.4);
-      b.box(0.1, 0.45, 0.1, 0x94a3b8, 4.2, 1.0, -4.75);
-      b.box(0.08, 0.08, 0.35, 0x94a3b8, 4.2, 1.4, -4.6);
-      b.props['cup'] = b.cyl(0.1, 0.18, 0xffffff, 3.6, 1.0, -4.4);
-      // cartaz do dente e estante de adesivos
+      // pia 3D Kenney e copo 3D para enxaguar
+      b.glb('bathroomSink', 4.2, 0, -4.4, { targetW: 1.6, targetH: 1.35, targetD: 0.9, collide: true });
+      b.props['cup'] = b.glb('cup', 3.6, 1.0, -4.4, { folder: 'food', targetW: 0.22, targetH: 0.26, targetD: 0.22 });
+      // cartaz do dente, planta e estante de adesivos
       const tooth = emojiSprite('🦷', 1.4);
       tooth.position.set(1.5, 2.6, -4.9);
       b.group.add(tooth);
+      b.glb('pottedPlant', 6.1, 0, -4.3, { targetW: 0.9, targetH: 1.3, targetD: 0.9, collide: true });
       b.box(0.1, 1.2, 2.4, 0xfde68a, -6.85, 1.0, -1.8);
       ['⭐', '🦄', '🚀'].forEach((e, i) => {
         const sp = emojiSprite(e, 0.55);
@@ -863,7 +935,7 @@ export const ROOMS: RoomDef[] = [
         b.group.add(sp);
         b.props['stk' + i] = sp;
       });
-      b.box(2.2, 0.04, 1.4, 0x86efac, -4.6, 0, -1.8);
+      b.glb('rugRectangle', -4.6, 0, -1.8, { targetW: 2.2, targetH: 0.04, targetD: 1.4 });
     },
   },
 ];

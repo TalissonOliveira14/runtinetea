@@ -46,7 +46,15 @@ export const OUT_ACTIONS: Partial<Record<ActionId, Action>> = {
       car.position.x = k > 0 && k < 1 ? lerp(25, -25, k) : 40;
       if (p > 0.2) c.once('honk', () => c.audio.sfx('honk'));
       if (p > 0.22) c.once('say1', () => c.say('Passou um carro! Espere ele passar.'));
-      if (p > 0.72) c.once('say2', () => c.say('Agora a rua está livre.'));
+      if (p > 0.72)
+        c.once('say2', () => {
+          c.say('Sinal verde para pedestres! Agora a rua está livre.');
+          const lr = c.props['lightRed'] as THREE.Mesh | undefined;
+          const lg = c.props['lightGreen'] as THREE.Mesh | undefined;
+          if (lr) (lr.material as THREE.MeshStandardMaterial).color.setHex(0x450a0a);
+          if (lg) (lg.material as THREE.MeshStandardMaterial).color.setHex(0x22c55e);
+          c.audio.sfx('chime');
+        });
       if (p > 0.85) c.once('ok', () => c.fx.popup('✅', c.at(0, 1.3, 0.2), 1.5, 0.9));
     },
   },
@@ -164,7 +172,8 @@ export const OUT_ACTIONS: Partial<Record<ActionId, Action>> = {
   },
 
   draw: {
-    duration: 8.5,
+    duration: 8.8,
+    ownsMove: true,
     start(c) {
       const crayon = new THREE.Mesh(
         new THREE.CylinderGeometry(0.02, 0.02, 0.16, 8),
@@ -172,29 +181,57 @@ export const OUT_ACTIONS: Partial<Record<ActionId, Action>> = {
       );
       c.room.add(crayon);
       c.state.crayon = crayon;
+      c.state.startPos = c.root.position.clone();
+      c.state.seatPos = V(-1.0, -0.36, 1.54);
     },
     update(c, p, dt) {
       const crayon = c.state.crayon as THREE.Mesh;
       const pieces = c.props['notebook'].userData['pieces'] as THREE.Object3D[];
-      const pen = V(-1.0 + 0.22 * Math.sin(c.time * 5), 0.95, 0.8 + 0.15 * Math.cos(c.time * 4));
-      c.reach('r', pen, 1);
+
+      if (p < 0.12) {
+        const k = ease(seg(p, 0, 0.12));
+        c.root.position.lerpVectors(c.state.startPos, c.state.seatPos, k);
+        c.root.rotation.y = lerp(c.faceYaw, Math.PI, k);
+        c.moving = true;
+      } else if (p < 0.88) {
+        c.moving = false;
+        c.root.position.copy(c.state.seatPos);
+        c.root.rotation.y = Math.PI;
+        c.setAnim('sit');
+      } else {
+        c.setAnim(undefined);
+        const kStand = ease(seg(p, 0.88, 1.0));
+        c.root.position.lerpVectors(c.state.seatPos, V(-1.0, 0, 2.05), kStand);
+        c.moving = p < 0.98;
+      }
+
+      const pen = V(-1.0 + 0.22 * Math.sin(c.time * 5), 0.92, 0.8 + 0.15 * Math.cos(c.time * 4));
+      if (p >= 0.12 && p < 0.88) {
+        c.reach('r', pen, 1);
+        c.reach('l', V(-1.22, 0.88, 0.85), 0.7);
+        c.pose.lean = 0.22;
+      } else {
+        c.pose.lean = 0;
+      }
       crayon.position.copy(pen).add(V(0, 0.07, 0));
       crayon.rotation.z = 0.5;
-      c.pose.lean = 0.25;
-      [0.12, 0.42, 0.7].forEach((at, i) => {
+      [0.16, 0.44, 0.7].forEach((at, i) => {
         const k = ease(seg(p, at, at + 0.14));
         pieces[i].visible = k > 0;
         pieces[i].scale.setScalar(Math.max(0.001, k));
       });
       (crayon.material as THREE.MeshStandardMaterial).color.setHex(p < 0.4 ? 0xfacc15 : p < 0.68 ? 0xef4444 : 0x22c55e);
-      c.every('sc', dt, 0.22, () => c.audio.sfx('scrub'));
-      if (p > 0.9)
+      if (p >= 0.14 && p < 0.86) c.every('sc', dt, 0.22, () => c.audio.sfx('scrub'));
+      if (p > 0.88)
         c.once('end', () => {
           c.audio.sfx('sparkle');
           c.fx.popup('🎨', c.at(0, 1.3, 0.1), 1.8, 1.0);
         });
     },
     end(c) {
+      c.setAnim(undefined);
+      c.pose.lean = 0;
+      c.root.position.set(-1.0, 0, 2.05);
       (c.state.crayon as THREE.Mesh).removeFromParent();
     },
   },
@@ -223,17 +260,37 @@ export const OUT_ACTIONS: Partial<Record<ActionId, Action>> = {
   },
 
   lunch: {
-    duration: 7,
+    duration: 7.4,
+    ownsMove: true,
     start(c) {
       c.state.from = c.props['sandwich'].position.clone();
+      c.state.startPos = c.root.position.clone();
+      c.state.seatPos = V(3.0, -0.36, 1.54);
     },
     update(c, p) {
       const H = c.H;
-      c.props['lunchLid'].rotation.x = -1.9 * ease(seg(p, 0, 0.1));
+      if (p < 0.12) {
+        const k = ease(seg(p, 0, 0.12));
+        c.root.position.lerpVectors(c.state.startPos, c.state.seatPos, k);
+        c.root.rotation.y = lerp(c.faceYaw, Math.PI, k);
+        c.moving = true;
+      } else if (p < 0.88) {
+        c.moving = false;
+        c.root.position.copy(c.state.seatPos);
+        c.root.rotation.y = Math.PI;
+        c.setAnim('sit');
+      } else {
+        c.setAnim(undefined);
+        const kStand = ease(seg(p, 0.88, 1.0));
+        c.root.position.lerpVectors(c.state.seatPos, V(3.0, 0, 2.05), kStand);
+        c.moving = p < 0.98;
+      }
+
+      c.props['lunchLid'].rotation.x = -1.9 * ease(seg(p, 0.08, 0.18));
       const sw = c.props['sandwich'];
       if (!c.state.held) {
-        fly(sw, c.state.from, c.at(0, 0.55, 0.3), ease(seg(p, 0.12, 0.3)), 0.5);
-        if (p >= 0.3)
+        fly(sw, c.state.from, c.at(0, 0.58, 0.28), ease(seg(p, 0.16, 0.32)), 0.45);
+        if (p >= 0.32)
           c.once('hold', () => {
             c.state.held = true;
             c.hold(sw);
@@ -242,9 +299,9 @@ export const OUT_ACTIONS: Partial<Record<ActionId, Action>> = {
       } else if (!c.state.eaten) {
         let m = 0;
         for (let i = 0; i < 3; i++) {
-          const s = 0.35 + 0.17 * i;
-          m = Math.max(m, Math.sin(Math.PI * seg(p, s, s + 0.17)));
-          if (p > s + 0.085)
+          const s = 0.36 + 0.16 * i;
+          m = Math.max(m, Math.sin(Math.PI * seg(p, s, s + 0.16)));
+          if (p > s + 0.08)
             c.once('bite' + i, () => {
               sw.scale.multiplyScalar(0.75);
               c.audio.sfx('munch');
@@ -252,16 +309,20 @@ export const OUT_ACTIONS: Partial<Record<ActionId, Action>> = {
               c.fx.spark.burst(w.x, w.y, w.z, 8, [0xfcd34d, 0xfef3c7], 1.5, 0.6);
             });
         }
-        sw.position.set(0, lerp(0.55, 0.88, m) * H, lerp(0.3, 0.16, m) * H);
-        c.pose.y = p > 0.35 && p < 0.88 ? Math.abs(Math.sin(c.time * 16)) * 0.03 : 0;
+        sw.position.set(0, lerp(0.58, 0.86, m) * H, lerp(0.28, 0.16, m) * H);
+        c.reach('r', sw.getWorldPosition(new THREE.Vector3()), 0.85);
       }
-      if (p > 0.92)
+      if (p > 0.86)
         c.once('gone', () => {
           c.discard();
           c.state.eaten = true;
           c.fx.popup('🧃', c.at(0, 1.3, 0.1), 1.8, 1.0);
           c.audio.sfx('sparkle');
         });
+    },
+    end(c) {
+      c.setAnim(undefined);
+      c.root.position.set(3.0, 0, 2.05);
     },
   },
 
